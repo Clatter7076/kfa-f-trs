@@ -65,14 +65,14 @@ jobs:
             echo "Tunnel ID is $TUNNEL_ID"
 
             cat << EOF > ~/.cloudflared/config.yml
-tunnel: $TUNNEL_ID
-credentials-file: /home/runner/.cloudflared/$TUNNEL_ID.json
-
-ingress:
-  - hostname: vnc.softwarerat.tech
-    service: tcp://localhost:5900
-  - service: http_status:404
-EOF
+            tunnel: $TUNNEL_ID
+            credentials-file: /home/runner/.cloudflared/$TUNNEL_ID.json
+            
+            ingress:
+              - hostname: vnc.softwarerat.tech
+                service: tcp://localhost:5900
+              - service: http_status:404
+            EOF
 
             echo "Config file created for the new tunnel."
           else
