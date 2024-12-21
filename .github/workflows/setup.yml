@@ -1,0 +1,63 @@
+name: Setup and Launch Brave Browser
+
+on: [push]
+
+jobs:
+  setup-and-launch:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout main repository
+      uses: actions/checkout@v4
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y x11vnc xvfb unzip
+
+    - name: Install Brave Browser
+      run: |
+        sudo curl -fsSLo /usr/share/keyrings/brave-browser-archive-keyring.gpg https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg
+        echo "deb [signed-by=/usr/share/keyrings/brave-browser-archive-keyring.gpg] https://brave-browser-apt-release.s3.brave.com/ stable main" | sudo tee /etc/apt/sources.list.d/brave-browser-release.list
+        sudo apt-get update
+        sudo apt-get install -y brave-browser
+
+    - name: Extract BraveSoftware.zip
+      run: |
+        mkdir -p ~/.config
+        unzip -P ${{ secrets.BRAVE_ZIP_PASSWORD }} BraveSoftware.zip -d ~/.config
+
+    - name: Install Cloudflared
+      run: |
+        sudo wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+        sudo dpkg -i cloudflared-linux-amd64.deb
+
+    - name: Start Xvfb
+      run: |
+        export DISPLAY=:99
+        Xvfb :99 -screen 0 1024x768x16 &
+
+    - name: Start x11vnc
+      run: |
+        export DISPLAY=:99
+        x11vnc -display :99 -N -forever -shared &
+
+    - name: Launch Brave Browser
+      run: |
+        export DISPLAY=:99
+        brave-browser --no-sandbox "${{ secrets.SECRET_URL }}"
+
+    - name: Start Cloudflared Tunnel
+      run: |
+        cloudflared tunnel --url tcp://localhost:5900 --logfile ./cloudflared.log --metrics localhost:45678 &
+        sleep 10 # Give it time to start and write the log
+
+    - name: Extract URL from Log
+      id: extract-url
+      run: |
+        URL=$(grep -o '[^ ]*\.trycloudflare\.com' ./cloudflared.log)
+        echo "tunnel-url=${URL}" >> $GITHUB_ENV
+
+    - name: Output Tunnel URL
+      run: |
+        echo "The Cloudflared tunnel URL is: ${{ env.tunnel-url }}"
