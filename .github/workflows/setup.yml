@@ -63,3 +63,8 @@ jobs:
     - name: Output Tunnel URL
       run: |
         echo "The Cloudflared tunnel URL is: ${{ env.tunnel-url }}"
+
+    # Infinite wait step to prevent job completion
+    - name: Wait indefinitely
+      run: |
+        while true; do sleep 1000; done
