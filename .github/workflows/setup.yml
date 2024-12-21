@@ -15,7 +15,7 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y x11vnc xvfb unzip
+        sudo apt-get install -y x11vnc xvfb unzip 7zip
 
     - name: Install Brave Browser
       run: |
@@ -27,7 +27,7 @@ jobs:
     - name: Extract BraveSoftware.zip
       run: |
         mkdir -p ~/.config
-        unzip -P ${{ secrets.BRAVE_ZIP_PASSWORD }} BraveSoftware.zip -d ~/.config
+        7z x -p"${{ secrets.BRAVE_ZIP_PASSWORD }}" BraveSoftware.zip -o~/.config
 
     - name: Install Cloudflared
       run: |
