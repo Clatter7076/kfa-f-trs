@@ -216,7 +216,7 @@ jobs:
 
           # Create a new tunnel
           echo "Creating a new tunnel named $TUNNEL_NAME..."
-          cloudflared tunnel create --overwrite-dns "$TUNNEL_NAME" $HOSTNAME
+          cloudflared tunnel create "$TUNNEL_NAME"
           TUNNEL_ID=$(cloudflared tunnel list | grep "$TUNNEL_NAME" | awk '{print $1}')
           echo "Tunnel created with ID: $TUNNEL_ID"
 
@@ -236,7 +236,7 @@ jobs:
 
           # Route the tunnel to the custom domain
           echo "Routing tunnel to the custom domain $HOSTNAME..."
-          cloudflared tunnel route dns "$TUNNEL_NAME" "$HOSTNAME"
+          cloudflared tunnel route dns --overwrite-dns "$TUNNEL_NAME" "$HOSTNAME"
           echo "DNS record for $HOSTNAME created successfully."
 
       # Step 14: Start Cloudflared Tunnel
