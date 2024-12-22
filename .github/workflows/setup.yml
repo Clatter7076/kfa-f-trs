@@ -65,8 +65,8 @@ jobs:
           export DISPLAY=:99
           nohup brave-browser --no-sandbox "${{ secrets.SECRET_URL }}" &
 
-      # Step 10: Check, Delete Existing Tunnel, Create New Tunnel, and Route DNS
-      - name: Check, Delete Existing Tunnel, Create New Tunnel, and Route DNS
+      # Step 10: Check, Delete Existing Tunnel and DNS Route, Create New Tunnel, and Route DNS
+      - name: Check, Delete Existing Tunnel and DNS Route, Create New Tunnel, and Route DNS
         run: |
           # Define tunnel name and hostname from secrets
           TUNNEL_NAME="github-actions-tunnel"
@@ -81,6 +81,11 @@ jobs:
             echo "Tunnel exists. Deleting tunnel with ID: $TUNNEL_ID..."
             cloudflared tunnel delete "$TUNNEL_ID"
             echo "Tunnel deleted."
+
+            # Delete existing DNS route
+            echo "Deleting existing DNS route for $HOSTNAME..."
+            cloudflared tunnel route dns remove "$TUNNEL_NAME" "$HOSTNAME"
+            echo "DNS route deleted."
           fi
 
           # Create a new tunnel
