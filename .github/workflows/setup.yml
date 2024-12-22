@@ -77,12 +77,10 @@ jobs:
 
       # 9. Serve user.js Locally
       - name: Serve user.js Locally
+        env:
+          USER_JS: ${{ secrets.USER_JS }}
         run: |
-          USER_JS=${{ secrets.USER_JS }}
-          cat <<EOF > user.js
-          $USER_JS
-          EOF
-
+          echo "$USER_JS" > user.js
           nohup python3 -m http.server 8000 &
 
       # 10. Automate with Playwright
