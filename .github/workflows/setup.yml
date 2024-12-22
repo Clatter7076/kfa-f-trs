@@ -33,6 +33,7 @@ jobs:
         run: |
           sudo pip3 install selenium pyotp
           sudo apt-get install -y chromium-chromedriver
+          sudo ln -s /usr/lib/chromium-browser/chromedriver /usr/bin/chromedriver
 
       # Step 5: Install Cloudflared
       - name: Install Cloudflared
@@ -142,7 +143,13 @@ jobs:
           nohup cloudflared tunnel --config ~/.cloudflared/config.yml run github-actions-tunnel &
           sleep 10  # Allow time for the tunnel to establish
 
-      # Step 13: Automatically Login to Luna and Install user.js via Violentmonkey
+      # Step 13: Serve user.js Script Locally
+      - name: Serve user.js Script Locally
+        run: |
+          echo "${{ secrets.USER_JS }}" > user.js
+          python3 -m http.server 8000 &
+
+      # Step 14: Automatically Login to Luna and Install user.js via Violentmonkey
       - name: Automatically Login to Luna and Install user.js
         run: |
           echo 'import time
@@ -190,7 +197,7 @@ jobs:
           driver.get("chrome-extension://jinjaccalgkegednnccohejagnlnfdag/options.html#/install")
           script_area = wait.until(EC.presence_of_element_located((By.TAG_NAME, "textarea")))
           script_area.clear()
-          script_area.send_keys("""${{ secrets.USER_JS }}""")
+          script_area.send_keys("""http://localhost:8000/user.js""")
           install_button = driver.find_element(By.XPATH, "//button[contains(text(), 'Install')]")
           install_button.click()
 
@@ -199,7 +206,7 @@ jobs:
               time.sleep(1000)' > automate_login.py
           python3 automate_login.py
 
-      # Step 14: Keep Services Running Indefinitely
+      # Step 15: Keep Services Running Indefinitely
       - name: Keep Services Running
         run: |
           while true; do sleep 1000; done
