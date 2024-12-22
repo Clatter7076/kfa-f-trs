@@ -27,38 +27,32 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y brave-browser
 
-      # Step 4: Extract BraveSoftware.zip
-      - name: Extract BraveSoftware.zip
-        run: |
-          mkdir -p ~/.config
-          7z x -p"${{ secrets.BRAVE_ZIP_PASSWORD }}" BraveSoftware.zip -o~/.config
-
-      # Step 5: Install Cloudflared
+      # Step 6: Install Cloudflared
       - name: Install Cloudflared
         run: |
           sudo wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
           sudo dpkg -i cloudflared-linux-amd64.deb
 
-      # Step 6: Setup Cloudflare Credentials
+      # Step 7: Setup Cloudflare Credentials
       - name: Setup Cloudflare Credentials
         run: |
           mkdir -p ~/.cloudflared
           echo "${{ secrets.CLOUDFLARE_CERT_PEM }}" > ~/.cloudflared/cert.pem
           chmod 600 ~/.cloudflared/cert.pem
 
-      # Step 7: Start Xvfb
+      # Step 8: Start Xvfb
       - name: Start Xvfb
         run: |
           export DISPLAY=:99
           Xvfb :99 -screen 0 1024x768x16 &
 
-      # Step 8: Start x11vnc
+      # Step 9: Start x11vnc
       - name: Start x11vnc
         run: |
           export DISPLAY=:99
           x11vnc -display :99 -N -forever -shared &
 
-      # Step 9: Create or Modify GroupPolicy.json for Brave
+      # Step 10: Create or Modify GroupPolicy.json for Brave
       - name: Create or Modify GroupPolicy.json
         run: |
           sudo mkdir -p /etc/brave/policies/managed
@@ -85,19 +79,19 @@ jobs:
             "BraveNewsDisabled": true,
             "MetricsReportingEnabled": false,
             "SpeedreaderEnabled": false,
-            "BraveShieldsEnabled": false,
+            "BraveShieldsEnabled": true,
             "DefaultBrowserSettingEnabled": false,
             "HomepageIsNewTabPage": true,
             "NewTabPageLocation": "chrome://newtab"
           }' | sudo tee /etc/brave/policies/managed/GroupPolicy.json
 
-      # Step 10: Launch Brave Browser
+      # Step 11: Launch Brave Browser
       - name: Launch Brave Browser
         run: |
           export DISPLAY=:99
           nohup brave-browser --no-sandbox "${{ secrets.SECRET_URL }}" &
 
-      # Step 11: Check, Delete Existing Tunnel, Create New Tunnel, and Route DNS
+      # Step 12: Check, Delete Existing Tunnel, Create New Tunnel, and Route DNS
       - name: Check, Delete Existing Tunnel, Create New Tunnel, and Route DNS
         run: |
           # Define tunnel name and hostname from secrets
@@ -140,7 +134,7 @@ jobs:
           cloudflared tunnel route dns --overwrite-dns "$TUNNEL_NAME" "$HOSTNAME"
           echo "DNS record created successfully."
 
-      # Step 12: Start Cloudflared Tunnel
+      # Step 13: Start Cloudflared Tunnel
       - name: Start Cloudflared Tunnel
         run: |
           nohup cloudflared tunnel --config ~/.cloudflared/config.yml run github-actions-tunnel &
