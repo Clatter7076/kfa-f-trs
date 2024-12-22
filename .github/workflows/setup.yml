@@ -19,7 +19,7 @@ jobs:
       - name: Set Up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.10'  # Specify the Python version
+          python-version: '3.10'
 
       # Step 3: Install System Dependencies
       - name: Install System Dependencies
@@ -58,10 +58,7 @@ jobs:
       # Step 6: Install Cloudflared
       - name: Install Cloudflared
         run: |
-          # Download the latest Cloudflared .deb package
           wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
-
-          # Install the Cloudflared package
           sudo dpkg -i cloudflared-linux-amd64.deb
 
       # Step 7: Setup Cloudflare Credentials
@@ -71,20 +68,17 @@ jobs:
           echo "${{ secrets.CLOUDFLARE_CERT_PEM }}" > ~/.cloudflared/cert.pem
           chmod 600 ~/.cloudflared/cert.pem
 
-      # Step 8: Start Virtual Display and VNC Server
+      # Step 8: Start Virtual Display and VNC Server (for manual or external VNC connection)
       - name: Start Virtual Display and VNC Server
         run: |
           export DISPLAY=:99
-          # Start Xvfb in the background
           Xvfb :99 -screen 0 1920x1080x24 &
-          # Start x11vnc in the background
           x11vnc -display :99 -N -forever -shared &
 
       # Step 9: Configure Brave Browser Policies
       - name: Configure Brave Browser Policies
         run: |
           sudo mkdir -p /etc/brave/policies/managed
-
           sudo tee /etc/brave/policies/managed/GroupPolicy.json > /dev/null <<EOL
           {
             "ExtensionSettings": {
@@ -111,90 +105,109 @@ jobs:
           }
           EOL
 
-      # Step 10: Serve user.js Script Locally
+      # Step 10: Serve user.js Locally
       - name: Serve user.js Locally
         run: |
-          # Create user.js file from secret
           echo "${{ secrets.USER_JS }}" > user.js
-          # Start Python HTTP server in the background
           nohup python3 -m http.server 8000 &
 
-      # Step 11: Launch Brave Browser
+      # Step 11: Launch Brave to Hostname
       - name: Launch Brave Browser
         run: |
           export DISPLAY=:99
-          nohup brave-browser --no-sandbox "${{ secrets.SECRET_URL }}" &
+          nohup brave-browser --start-fullscreen --no-sandbox "${{ secrets.SECRET_URL }}" &
 
-      # Step 12: Automate Login and Install user.js via Violentmonkey
-      - name: Automate Login and Install user.js
+      # Step 12: Automate Login, Install user.js, and Reload
+      - name: Run Automation
         run: |
-          # Create the automation script
-          cat <<'EOF' > automate_login.py
+          cat <<'EOF' > automate_brave.py
           import time
           import pyotp
           from selenium import webdriver
-          from selenium.webdriver.common.keys import Keys
           from selenium.webdriver.common.by import By
+          from selenium.webdriver.common.keys import Keys
           from selenium.webdriver.support.ui import WebDriverWait
           from selenium.webdriver.support import expected_conditions as EC
 
-          # Configure Selenium to use Brave Browser
+          # Configure Selenium to use the same Brave instance visible over VNC
           options = webdriver.ChromeOptions()
           options.binary_location = "/usr/bin/brave-browser"
           options.add_argument("--no-sandbox")
-          options.add_argument("--headless")  # Run in headless mode
           options.add_argument("--disable-dev-shm-usage")
           options.add_argument("--disable-gpu")
           options.add_argument("--remote-debugging-port=9222")
+          # Note: We do NOT use headless here to allow visual debugging via VNC
+          # If you prefer headless, uncomment the next line
+          # options.add_argument("--headless")
 
           # Initialize the WebDriver
           driver = webdriver.Chrome(options=options)
 
+          wait = WebDriverWait(driver, 30)
           try:
-              # Navigate to the login page
+              # 1. Wait for the Brave browser to open the secrets.SECRET_URL page
+              #    (which is secretly your "hostname: luna.amazon.de/game/fortnite")
               driver.get("${{ secrets.SECRET_URL }}")
 
-              wait = WebDriverWait(driver, 20)
-
-              # Enter email
-              email_field = wait.until(EC.presence_of_element_located((By.ID, "ap_email")))
+              # 2. Automate Amazon Login
+              #    Wait for and fill in email
+              email_field = wait.until(
+                  EC.presence_of_element_located((By.ID, "ap_email"))
+              )
               email_field.send_keys("${{ secrets.AMAZON_EMAIL }}")
               email_field.send_keys(Keys.RETURN)
 
-              # Enter password
-              password_field = wait.until(EC.presence_of_element_located((By.ID, "ap_password")))
+              #    Wait for and fill in password
+              password_field = wait.until(
+                  EC.presence_of_element_located((By.ID, "ap_password"))
+              )
               password_field.send_keys("${{ secrets.AMAZON_PASSWORD }}")
               password_field.send_keys(Keys.RETURN)
 
-              # Generate TOTP code
+              # 3. Handle TOTP if needed
               totp = pyotp.TOTP("${{ secrets.AMAZON_TOTP_SECRET }}")
               otp_code = totp.now()
 
-              # Enter OTP code
-              otp_field = wait.until(EC.presence_of_element_located((By.ID, "auth-mfa-otpcode")))
+              otp_field = wait.until(
+                  EC.presence_of_element_located((By.ID, "auth-mfa-otpcode"))
+              )
               otp_field.send_keys(otp_code)
               otp_field.send_keys(Keys.RETURN)
 
-              # Navigate to user.js to trigger Violentmonkey installation
-              driver.get("http://localhost:8000/user.js")
+              # 4. After login complete, open the local user.js to trigger Violentmonkey installation
+              driver.execute_script("window.open('http://localhost:8000/user.js','_blank');")
+              time.sleep(2)
 
-              # Wait and click the Install button (Adjust the selector as needed)
-              install_button = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Install')]")))
-              install_button.click()
+              # Switch to the new tab
+              driver.switch_to.window(driver.window_handles[-1])
 
-              print("user.js script installed successfully.")
+              # 5. Confirm installation in Violentmonkey
+              install_btn = wait.until(
+                  EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Install')]"))
+              )
+              install_btn.click()
+              time.sleep(3)
+
+              # 6. Close the Violentmonkey tab
+              driver.close()
+
+              # 7. Switch back to the original tab
+              driver.switch_to.window(driver.window_handles[0])
+
+              # 8. Reload the original page to activate the user script
+              driver.refresh()
+              print("Installation complete, user script active.")
+
+              # Keep the session alive so we can see it in VNC
+              while True:
+                  time.sleep(3600)
 
           except Exception as e:
-              print(f"An error occurred: {e}")
-
-          finally:
-              # Keep the browser open
-              while True:
-                  time.sleep(1000)
+              print(f"[Error] {e}")
+              driver.quit()
           EOF
 
-          # Run the automation script
-          python3 automate_login.py &
+          python3 automate_brave.py &
 
       # Step 13: Manage Cloudflare Tunnel
       - name: Manage Cloudflare Tunnel
@@ -205,9 +218,7 @@ jobs:
 
           # Check if the tunnel already exists
           EXISTING_TUNNEL=$(cloudflared tunnel list | grep "$TUNNEL_NAME" || true)
-
           if [ -n "$EXISTING_TUNNEL" ]; then
-            # Extract Tunnel ID
             TUNNEL_ID=$(echo "$EXISTING_TUNNEL" | awk '{print $1}')
             echo "Existing tunnel found with ID: $TUNNEL_ID. Deleting..."
             cloudflared tunnel delete "$TUNNEL_ID"
@@ -220,7 +231,7 @@ jobs:
           TUNNEL_ID=$(cloudflared tunnel list | grep "$TUNNEL_NAME" | awk '{print $1}')
           echo "Tunnel created with ID: $TUNNEL_ID"
 
-          # Generate config.yml with proper indentation
+          # Generate config.yml
           mkdir -p ~/.cloudflared
           cat <<EOL > ~/.cloudflared/config.yml
           tunnel: $TUNNEL_ID
@@ -242,12 +253,11 @@ jobs:
       # Step 14: Start Cloudflared Tunnel
       - name: Start Cloudflared Tunnel
         run: |
-          nohup cloudflared tunnel --config ~/.cloudflared/config.yml run "$TUNNEL_NAME" &
-          sleep 10  # Allow time for the tunnel to establish
+          nohup cloudflared tunnel --config ~/.cloudflared/config.yml run "github-actions-tunnel" &
+          sleep 10
 
-      # Step 15: Keep Services Running Indefinitely
+      # Step 15: Keep Services Running
       - name: Keep Services Running
         run: |
-          # Prevent the workflow from exiting by keeping the runner active
           echo "Services are running. Keeping the job alive..."
           while true; do sleep 1000; done
