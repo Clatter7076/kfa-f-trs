@@ -18,7 +18,7 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y x11vnc xvfb unzip 7zip python3 python3-pip
+          sudo apt-get install -y x11vnc xvfb unzip python3 python3-pip
 
       # Step 3: Install Brave Browser
       - name: Install Brave Browser
@@ -32,7 +32,6 @@ jobs:
       - name: Install Selenium and WebDriver
         run: |
           sudo pip3 install selenium pyotp
-          sudo apt-get install -y chromium-chromedriver
 
       # Step 5: Install Cloudflared
       - name: Install Cloudflared
@@ -146,7 +145,7 @@ jobs:
       - name: Serve user.js Script Locally
         run: |
           echo "${{ secrets.USER_JS }}" > user.js
-          python3 -m http.server 8000 &
+          nohup python3 -m http.server 8000 &
 
       # Step 14: Automatically Login to Luna and Install user.js via Violentmonkey
       - name: Automatically Login to Luna and Install user.js
@@ -192,12 +191,12 @@ jobs:
           otp_field.send_keys(otp_code)
           otp_field.send_keys(Keys.RETURN)
 
-          # Install the user.js script via Violentmonkey
-          driver.get("chrome-extension://jinjaccalgkegednnccohejagnlnfdag/options.html#/install")
-          script_area = wait.until(EC.presence_of_element_located((By.TAG_NAME, "textarea")))
-          script_area.clear()
-          script_area.send_keys("""http://localhost:8000/user.js""")
-          install_button = driver.find_element(By.XPATH, "//button[contains(text(), 'Install')]")
+          # Navigate to the local HTTP server URL to install the user.js script via Violentmonkey
+          driver.get("http://localhost:8000/user.js")
+
+          # Wait for the Violentmonkey installation prompt and accept it
+          # Note: You may need to adjust the following lines based on how Violentmonkey's prompt is structured
+          install_button = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Install')]")))
           install_button.click()
 
           # Keep the browser running
