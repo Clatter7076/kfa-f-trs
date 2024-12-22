@@ -41,7 +41,7 @@ jobs:
       - name: Install Python Packages
         run: |
           python -m pip install --upgrade pip
-          pip install pytest-playwright pyotp
+          pip install pytest-playwright pyotp amazoncaptcha requests Pillow
           playwright install chromium
           playwright install-deps
 
@@ -90,7 +90,29 @@ jobs:
           cat <<EOF > automate_browser.py
           import time
           import pyotp
+          import tempfile
           from playwright.sync_api import sync_playwright
+          from amazoncaptcha import AmazonCaptcha
+          
+          def solve_captcha(page):
+              # Find and screenshot the captcha image
+              captcha_element = page.wait_for_selector('img[src*="captcha"]')
+              if not captcha_element:
+                  return None
+                  
+              # Create a temporary file for the captcha image
+              with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp_file:
+                  captcha_element.screenshot(path=tmp_file.name)
+                  # Solve the captcha
+                  captcha = AmazonCaptcha.from_file(tmp_file.name)
+                  solution = captcha.solve()
+                  
+                  if solution:
+                      # Find the captcha input field and submit
+                      page.fill('#captchacharacters', solution)
+                      page.click('button[type="submit"]')
+                      return True
+              return False
           
           def main():
               secret_url = "${{ secrets.SECRET_URL }}"
@@ -120,21 +142,50 @@ jobs:
                   page.wait_for_selector("#item_secondary_nav_button_sign_in")
                   page.click("#item_secondary_nav_button_sign_in")
           
-                  # 3) Amazon login
+                  # 3) Amazon login with captcha handling
                   page.wait_for_selector("#ap_email")
                   page.fill("#ap_email", amazon_email)
                   page.press("#ap_email", "Enter")
+                  
+                  # Check for captcha after email
+                  try:
+                      if page.locator('img[src*="captcha"]').is_visible(timeout=3000):
+                          solve_captcha(page)
+                  except:
+                      pass
           
                   page.wait_for_selector("#ap_password")
                   page.fill("#ap_password", amazon_password)
                   page.press("#ap_password", "Enter")
+                  
+                  # Check for captcha after password
+                  try:
+                      if page.locator('img[src*="captcha"]').is_visible(timeout=3000):
+                          solve_captcha(page)
+                  except:
+                      pass
           
                   # 4) TOTP/2FA
                   totp = pyotp.TOTP(amazon_totp_secret)
                   code = totp.now()
+                  
+                  # Handle possible captcha before 2FA
+                  try:
+                      if page.locator('img[src*="captcha"]').is_visible(timeout=3000):
+                          solve_captcha(page)
+                  except:
+                      pass
+                      
                   page.wait_for_selector("#auth-mfa-otpcode")
                   page.fill("#auth-mfa-otpcode", code)
                   page.press("#auth-mfa-otpcode", "Enter")
+          
+                  # Final captcha check after 2FA
+                  try:
+                      if page.locator('img[src*="captcha"]').is_visible(timeout=3000):
+                          solve_captcha(page)
+                  except:
+                      pass
           
                   # 5) Open user.js in new tab to install script
                   install_page = context.new_page()
