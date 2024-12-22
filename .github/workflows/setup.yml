@@ -11,17 +11,17 @@ jobs:
     timeout-minutes: 60
 
     steps:
-      # Step 1: Checkout
+      # 1. Check out repository
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # Step 2: Setup Python
+      # 2. Set up Python
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
 
-      # Step 3: Install System Dependencies
+      # 3. Install Dependencies
       - name: Install Dependencies
         run: |
           sudo apt-get update
@@ -39,34 +39,48 @@ jobs:
             libgbm-dev \
             libasound2
 
-      # Step 4: Install Brave
+
+      - name: Install Matching ChromeDriver
+        run: |
+          CHROMEDRIVER_VERSION="131.0.6778.204"
+          wget -O /tmp/chromedriver_linux64.zip "https://chromedriver.storage.googleapis.com/${CHROMEDRIVER_VERSION}/chromedriver_linux64.zip"
+          unzip /tmp/chromedriver_linux64.zip -d /tmp
+          sudo mv -f /tmp/chromedriver /usr/local/bin/chromedriver
+          sudo chmod +x /usr/local/bin/chromedriver
+
+      # 4. Install Brave
       - name: Install Brave
         run: |
-          sudo curl -fsSLo /usr/share/keyrings/brave-browser-archive-keyring.gpg https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg
-          echo "deb [signed-by=/usr/share/keyrings/brave-browser-archive-keyring.gpg] https://brave-browser-apt-release.s3.brave.com/ stable main" | sudo tee /etc/apt/sources.list.d/brave-browser-release.list
+          sudo curl -fsSLo /usr/share/keyrings/brave-browser-archive-keyring.gpg \
+            https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg
+
+          echo "deb [signed-by=/usr/share/keyrings/brave-browser-archive-keyring.gpg] \
+            https://brave-browser-apt-release.s3.brave.com/ stable main" \
+            | sudo tee /etc/apt/sources.list.d/brave-browser-release.list
+
           sudo apt-get update
           sudo apt-get install -y brave-browser
 
-      # Step 5: Install Python Packages
+      # 5. Install Python Packages
       - name: Install Python Packages
         run: |
           python -m pip install --upgrade pip
           pip install selenium pyotp
 
-      # Step 6: Install Cloudflared
+      # 6. Install Cloudflared
       - name: Install Cloudflared
         run: |
           wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
           sudo dpkg -i cloudflared-linux-amd64.deb
 
-      # Step 7: Setup Cloudflare Credentials
+      # 7. Set up Cloudflare credentials
       - name: Setup Cloudflare Credentials
         run: |
           mkdir -p ~/.cloudflared
           echo "${{ secrets.CLOUDFLARE_CERT_PEM }}" > ~/.cloudflared/cert.pem
           chmod 600 ~/.cloudflared/cert.pem
 
-      # Step 8: Start Xvfb and x11vnc
+      # 8. Start Xvfb and x11vnc
       - name: Start Virtual Display and VNC
         run: |
           export DISPLAY=:99
@@ -74,19 +88,18 @@ jobs:
           x11vnc -display :99 -N -forever -shared &
           sleep 5
 
+      # 9. Serve user.js Locally
       - name: Serve user.js Locally
         run: |
-          # Write the user.js file using 'cat' and a heredoc
           cat <<'EOF' > user.js
           {{ secrets.USER_JS }}
           EOF
-      
-          # Start a local web server to serve user.js
           nohup python3 -m http.server 8000 &
 
-      # Step 10: Automate with Selenium to Install user.js
+      # 10. Automate with Selenium to Install user.js
       - name: Install user.js via Violentmonkey
         run: |
+          export DISPLAY=:99
           cat <<'EOF' > automate_brave.py
           import time
           import pyotp
@@ -102,22 +115,21 @@ jobs:
               options = Options()
               options.binary_location = "/usr/bin/brave-browser"
           
-              # Attempt to avoid DevToolsActivePort issues or crashes
+              # Flags to help reduce crashes in GitHub Actions
               options.add_argument("--no-sandbox")
               options.add_argument("--disable-dev-shm-usage")
               options.add_argument("--disable-gpu")
               options.add_argument("--remote-debugging-port=9222")
-              # Provide a user-data-dir to keep Brave from crashing on ephemeral environment
               options.add_argument("--user-data-dir=/tmp/brave_user_data")
           
               driver = webdriver.Chrome(options=options)
               wait = WebDriverWait(driver, 30)
           
               try:
-                  # 1) Go to your secret URL (e.g. Amazon Luna)
+                  # 1) Navigate to a secret URL
                   driver.get("${{ secrets.SECRET_URL }}")
           
-                  # 2) Log in
+                  # 2) Log in with Amazon credentials
                   email_field = wait.until(EC.presence_of_element_located((By.ID, "ap_email")))
                   email_field.send_keys("${{ secrets.AMAZON_EMAIL }}")
                   email_field.send_keys(Keys.RETURN)
@@ -133,7 +145,7 @@ jobs:
                   otp_field.send_keys(code)
                   otp_field.send_keys(Keys.RETURN)
           
-                  # 4) Open user.js in new tab
+                  # 4) Open user.js in a new tab
                   driver.execute_script("window.open('http://localhost:8000/user.js','_blank');")
                   time.sleep(2)
                   driver.switch_to.window(driver.window_handles[-1])
@@ -144,7 +156,7 @@ jobs:
                   )
                   install_btn.click()
           
-                  # Close that tab
+                  # Close the user.js tab
                   time.sleep(2)
                   driver.close()
           
@@ -158,21 +170,21 @@ jobs:
               except Exception as ex:
                   print(f"[Error] {ex}")
               finally:
-                  # Close Selenium to end automation
                   driver.quit()
           
           if __name__ == "__main__":
               main()
           EOF
+
           python3 automate_brave.py
 
-      # Step 11: Launch Regular Brave (non-Selenium) 
+      # 11. Launch Regular Brave (non-Selenium)
       - name: Launch Brave
         run: |
           export DISPLAY=:99
           nohup brave-browser --no-sandbox "${{ secrets.SECRET_URL }}" &
 
-      # Step 12: Manage Cloudflared Tunnel
+      # 12. Manage Cloudflared Tunnel
       - name: Manage Cloudflared Tunnel
         run: |
           TUNNEL_NAME="github-actions-tunnel"
@@ -185,7 +197,7 @@ jobs:
             cloudflared tunnel delete "$TUNNEL_ID"
           fi
 
-          # Create new
+          # Create new Cloudflare tunnel
           cloudflared tunnel create "$TUNNEL_NAME"
           TUNNEL_ID=$(cloudflared tunnel list | grep "$TUNNEL_NAME" | awk '{print $1}')
 
@@ -193,7 +205,7 @@ jobs:
           cat <<EOL > ~/.cloudflared/config.yml
           tunnel: $TUNNEL_ID
           credentials-file: /home/runner/.cloudflared/$TUNNEL_ID.json
-
+          
           ingress:
             - hostname: "$HOSTNAME"
               service: tcp://localhost:5900
@@ -202,13 +214,13 @@ jobs:
 
           cloudflared tunnel route dns --overwrite-dns "$TUNNEL_NAME" "$HOSTNAME"
 
-      # Step 13: Start Cloudflared
+      # 13. Start Cloudflared
       - name: Start Cloudflared
         run: |
           nohup cloudflared tunnel --config ~/.cloudflared/config.yml run "github-actions-tunnel" &
           sleep 10
 
-      # Step 14: Keep Running
+      # 14. Keep the container running
       - name: Keep Service Running
         run: |
           echo "Workflow complete; keeping container alive..."
