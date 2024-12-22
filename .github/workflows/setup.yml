@@ -105,7 +105,7 @@ jobs:
 
           # Route the tunnel to your custom domain using Cloudflared CLI with --overwrite-dns option
           echo "Routing tunnel to your custom domain..."
-          cloudflared tunnel route dns "$TUNNEL_NAME" "$HOSTNAME" --overwrite-dns
+          cloudflared tunnel route dns --overwrite-dns "$TUNNEL_NAME" "$HOSTNAME"
           echo "DNS record created successfully."
 
       # Step 11: Start Cloudflared Tunnel
