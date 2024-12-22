@@ -81,7 +81,7 @@ jobs:
             echo "credentials-file: /home/runner/.cloudflared/$TUNNEL_ID.json" >> ~/.cloudflared/config.yml
             echo "" >> ~/.cloudflared/config.yml
             echo "ingress:" >> ~/.cloudflared/config.yml
-            echo "  - hostname: vnc.softwarerat.tech" >> ~/.cloudflared/config.yml
+            echo "  - hostname: "${{ secrets.VNC_HOSTNAME }}"" >> ~/.cloudflared/config.yml
             echo "    service: tcp://localhost:5900" >> ~/.cloudflared/config.yml
             echo "  - service: http_status:404" >> ~/.cloudflared/config.yml
 
@@ -101,12 +101,7 @@ jobs:
           nohup cloudflared tunnel --config ~/.cloudflared/config.yml run github-actions-tunnel &
           sleep 10  # Allow time for the tunnel to establish
 
-      # Step 12: Output Tunnel URL (Custom Domain)
-      - name: Output Tunnel URL
-        run: |
-          echo "The VNC server is available at vnc.softwarerat.tech"
-
-      # Step 13: Keep Services Running Indefinitely
+      # Step 12: Keep Services Running Indefinitely
       - name: Keep Services Running
         run: |
           while true; do sleep 1000; done
