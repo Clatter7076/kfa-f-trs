@@ -2,47 +2,91 @@ name: Setup and Automate Luna Login
 
 on:
   push:
+    branches:
+      - main  # Trigger the workflow on pushes to the main branch
 
 jobs:
   setup-and-launch:
     runs-on: ubuntu-latest
+    timeout-minutes: 60  # Set a timeout for the job to prevent indefinite runs
 
     steps:
-      # Step 1: Checkout the main repository
+      # Step 1: Checkout the Repository
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # Step 2: Install Dependencies
-      - name: Install Dependencies
+      # Step 2: Set Up Python Environment
+      - name: Set Up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'  # Specify the Python version
+
+      # Step 3: Install System Dependencies
+      - name: Install System Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y x11vnc xvfb unzip python3 python3-pip
+          sudo apt-get install -y \
+            x11vnc \
+            xvfb \
+            unzip \
+            curl \
+            wget \
+            gnupg \
+            libxss1 \
+            libappindicator3-1 \
+            libindicator7
 
-      # Step 3: Install Brave Browser
+      # Step 4: Install Brave Browser
       - name: Install Brave Browser
         run: |
+          # Add Brave's GPG key
           sudo curl -fsSLo /usr/share/keyrings/brave-browser-archive-keyring.gpg https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg
+
+          # Add Brave's repository
           echo "deb [signed-by=/usr/share/keyrings/brave-browser-archive-keyring.gpg] https://brave-browser-apt-release.s3.brave.com/ stable main" | sudo tee /etc/apt/sources.list.d/brave-browser-release.list
+
+          # Update package lists and install Brave browser
           sudo apt-get update
           sudo apt-get install -y brave-browser
 
-      # Step 4: Install Selenium and WebDriver
-      - name: Install Selenium and WebDriver
+      # Step 5: Install Selenium and Required Python Packages
+      - name: Install Python Packages
         run: |
-          sudo pip3 install selenium pyotp
+          python -m pip install --upgrade pip
+          pip install selenium pyotp
 
-      # Step 5: Setup and Start Xvfb and x11vnc
-      - name: Setup and Start Xvfb and x11vnc
+      # Step 6: Install Cloudflared
+      - name: Install Cloudflared
+        run: |
+          # Download the latest Cloudflared .deb package
+          wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+
+          # Install the Cloudflared package
+          sudo dpkg -i cloudflared-linux-amd64.deb
+
+      # Step 7: Setup Cloudflare Credentials
+      - name: Setup Cloudflare Credentials
+        run: |
+          mkdir -p ~/.cloudflared
+          echo "${{ secrets.CLOUDFLARE_CERT_PEM }}" > ~/.cloudflared/cert.pem
+          chmod 600 ~/.cloudflared/cert.pem
+
+      # Step 8: Start Xvfb and x11vnc
+      - name: Start Virtual Display and VNC Server
         run: |
           export DISPLAY=:99
-          Xvfb :99 -screen 0 1024x768x16 &
+          # Start Xvfb in the background
+          Xvfb :99 -screen 0 1920x1080x24 &
+          # Start x11vnc in the background
           x11vnc -display :99 -N -forever -shared &
 
-      # Step 6: Create or Modify GroupPolicy.json for Brave
-      - name: Create or Modify GroupPolicy.json
+      # Step 9: Configure Brave Browser Policies
+      - name: Configure Brave Browser Policies
         run: |
           sudo mkdir -p /etc/brave/policies/managed
-          echo '{
+
+          sudo tee /etc/brave/policies/managed/GroupPolicy.json > /dev/null <<EOL
+          {
             "ExtensionSettings": {
               "*": {
                 "installation_mode": "blocked"
@@ -64,21 +108,29 @@ jobs:
             "DefaultBrowserSettingEnabled": false,
             "HomepageIsNewTabPage": true,
             "NewTabPageLocation": "about:blank"
-          }' | sudo tee /etc/brave/policies/managed/GroupPolicy.json
+          }
+          EOL
 
-      # Step 7: Serve user.js Script Locally
-      - name: Serve user.js Script Locally
+      # Step 10: Serve user.js Script Locally
+      - name: Serve user.js Locally
         run: |
+          # Create user.js file from secret
           echo "${{ secrets.USER_JS }}" > user.js
+          # Start Python HTTP server in the background
           nohup python3 -m http.server 8000 &
 
-      # Step 8: Launch Brave Browser and Automate Login
-      - name: Launch Brave Browser and Automate Login
+      # Step 11: Launch Brave Browser
+      - name: Launch Brave Browser
         run: |
           export DISPLAY=:99
           nohup brave-browser --no-sandbox "${{ secrets.SECRET_URL }}" &
-          sleep 10  # Allow time for the browser to launch
-          echo 'import time
+
+      # Step 12: Automate Login and Install user.js via Violentmonkey
+      - name: Automate Login and Install user.js
+        run: |
+          # Create the automation script
+          cat <<'EOF' > automate_login.py
+          import time
           import pyotp
           from selenium import webdriver
           from selenium.webdriver.common.keys import Keys
@@ -86,53 +138,66 @@ jobs:
           from selenium.webdriver.support.ui import WebDriverWait
           from selenium.webdriver.support import expected_conditions as EC
 
-          # Set up options for Brave browser
+          # Configure Selenium to use Brave Browser
           options = webdriver.ChromeOptions()
           options.binary_location = "/usr/bin/brave-browser"
           options.add_argument("--no-sandbox")
-          options.add_argument("--headless")
+          options.add_argument("--headless")  # Run in headless mode
           options.add_argument("--disable-dev-shm-usage")
           options.add_argument("--disable-gpu")
           options.add_argument("--remote-debugging-port=9222")
 
-          # Set up the WebDriver
+          # Initialize the WebDriver
           driver = webdriver.Chrome(options=options)
-          driver.get("${{ secrets.SECRET_URL }}")
 
-          # Wait for the login page to load and input credentials
-          wait = WebDriverWait(driver, 10)
-          email_field = wait.until(EC.presence_of_element_located((By.ID, "ap_email")))
-          email_field.send_keys("${{ secrets.AMAZON_EMAIL }}")
-          email_field.send_keys(Keys.RETURN)
+          try:
+              # Navigate to the login page
+              driver.get("${{ secrets.SECRET_URL }}")
 
-          # Wait for the password field to load and input password
-          password_field = wait.until(EC.presence_of_element_located((By.ID, "ap_password")))
-          password_field.send_keys("${{ secrets.AMAZON_PASSWORD }}")
-          password_field.send_keys(Keys.RETURN)
+              wait = WebDriverWait(driver, 20)
 
-          # Generate OTP code using TOTP
-          totp = pyotp.TOTP("${{ secrets.AMAZON_TOTP_SECRET }}")
-          otp_code = totp.now()
+              # Enter email
+              email_field = wait.until(EC.presence_of_element_located((By.ID, "ap_email")))
+              email_field.send_keys("${{ secrets.AMAZON_EMAIL }}")
+              email_field.send_keys(Keys.RETURN)
 
-          # Handle 2FA if required
-          otp_field = wait.until(EC.presence_of_element_located((By.ID, "auth-mfa-otpcode")))
-          otp_field.send_keys(otp_code)
-          otp_field.send_keys(Keys.RETURN)
+              # Enter password
+              password_field = wait.until(EC.presence_of_element_located((By.ID, "ap_password")))
+              password_field.send_keys("${{ secrets.AMAZON_PASSWORD }}")
+              password_field.send_keys(Keys.RETURN)
 
-          # Navigate to the local HTTP server URL to install the user.js script via Violentmonkey
-          driver.get("http://localhost:8000/user.js")
+              # Generate TOTP code
+              totp = pyotp.TOTP("${{ secrets.AMAZON_TOTP_SECRET }}")
+              otp_code = totp.now()
 
-          # Wait for the Violentmonkey installation prompt and accept it
-          install_button = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Install')]")))
-          install_button.click()
+              # Enter OTP code
+              otp_field = wait.until(EC.presence_of_element_located((By.ID, "auth-mfa-otpcode")))
+              otp_field.send_keys(otp_code)
+              otp_field.send_keys(Keys.RETURN)
 
-          # Keep the browser running
-          while True:
-              time.sleep(1000)' > automate_login.py
-          python3 automate_login.py
+              # Navigate to user.js to trigger Violentmonkey installation
+              driver.get("http://localhost:8000/user.js")
 
-      # Step 9: Check, Delete Existing Tunnel, Create New Tunnel, and Route DNS
-      - name: Check, Delete Existing Tunnel, Create New Tunnel, and Route DNS
+              # Wait and click the Install button (Adjust the selector as needed)
+              install_button = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Install')]")))
+              install_button.click()
+
+              print("user.js script installed successfully.")
+
+          except Exception as e:
+              print(f"An error occurred: {e}")
+
+          finally:
+              # Keep the browser open
+              while True:
+                  time.sleep(1000)
+          EOF
+
+          # Run the automation script
+          python3 automate_login.py &
+
+      # Step 13: Manage Cloudflare Tunnel
+      - name: Manage Cloudflare Tunnel
         run: |
           # Define tunnel name and hostname from secrets
           TUNNEL_NAME="github-actions-tunnel"
@@ -142,45 +207,47 @@ jobs:
           EXISTING_TUNNEL=$(cloudflared tunnel list | grep "$TUNNEL_NAME" || true)
 
           if [ -n "$EXISTING_TUNNEL" ]; then
-            # Delete the existing tunnel
+            # Extract Tunnel ID
             TUNNEL_ID=$(echo "$EXISTING_TUNNEL" | awk '{print $1}')
-            echo "Tunnel exists. Deleting tunnel with ID: $TUNNEL_ID..."
+            echo "Existing tunnel found with ID: $TUNNEL_ID. Deleting..."
             cloudflared tunnel delete "$TUNNEL_ID"
             echo "Tunnel deleted."
           fi
 
           # Create a new tunnel
-          echo "Creating a new tunnel..."
+          echo "Creating a new tunnel named $TUNNEL_NAME..."
           cloudflared tunnel create "$TUNNEL_NAME"
           TUNNEL_ID=$(cloudflared tunnel list | grep "$TUNNEL_NAME" | awk '{print $1}')
-          echo "Tunnel ID: $TUNNEL_ID"
+          echo "Tunnel created with ID: $TUNNEL_ID"
 
-          # Create config.yml using multiple echo statements for proper indentation
+          # Generate config.yml with proper indentation
           mkdir -p ~/.cloudflared
-          {
-            echo "tunnel: $TUNNEL_ID"
-            echo "credentials-file: /home/runner/.cloudflared/$TUNNEL_ID.json"
-            echo ""
-            echo "ingress:"
-            echo "  - hostname: \"$HOSTNAME\""
-            echo "    service: tcp://localhost:5900"
-            echo "  - service: http_status:404"
-          } > ~/.cloudflared/config.yml
+          cat <<EOL > ~/.cloudflared/config.yml
+          tunnel: $TUNNEL_ID
+          credentials-file: /home/runner/.cloudflared/$TUNNEL_ID.json
+
+          ingress:
+            - hostname: "$HOSTNAME"
+              service: tcp://localhost:5900
+            - service: http_status:404
+          EOL
 
           echo "Cloudflare tunnel configuration created."
 
-          # Route the tunnel to your custom domain using Cloudflared CLI with --overwrite-dns option
-          echo "Routing tunnel to your custom domain..."
-          cloudflared tunnel route dns --overwrite-dns "$TUNNEL_NAME" "$HOSTNAME"
-          echo "DNS record created successfully."
+          # Route the tunnel to the custom domain
+          echo "Routing tunnel to the custom domain $HOSTNAME..."
+          cloudflared tunnel route dns "$TUNNEL_NAME" "$HOSTNAME"
+          echo "DNS record for $HOSTNAME created successfully."
 
-      # Step 10: Start Cloudflared Tunnel
+      # Step 14: Start Cloudflared Tunnel
       - name: Start Cloudflared Tunnel
         run: |
-          nohup cloudflared tunnel --config ~/.cloudflared/config.yml run github-actions-tunnel &
+          nohup cloudflared tunnel --config ~/.cloudflared/config.yml run "$TUNNEL_NAME" &
           sleep 10  # Allow time for the tunnel to establish
 
-      # Step 11: Keep Services Running Indefinitely
+      # Step 15: Keep Services Running Indefinitely
       - name: Keep Services Running
         run: |
+          # Prevent the workflow from exiting by keeping the runner active
+          echo "Services are running. Keeping the job alive..."
           while true; do sleep 1000; done
