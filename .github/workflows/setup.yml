@@ -8,16 +8,19 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout main repository
+      # Step 1: Checkout the main repository
+      - name: Checkout Repository
         uses: actions/checkout@v4
         with:
-          lfs: 'true'
+          lfs: true
 
-      - name: Install dependencies
+      # Step 2: Install necessary dependencies
+      - name: Install Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y x11vnc xvfb unzip p7zip-full
+          sudo apt-get install -y x11vnc xvfb unzip 7zip
 
+      # Step 3: Install Brave Browser
       - name: Install Brave Browser
         run: |
           sudo curl -fsSLo /usr/share/keyrings/brave-browser-archive-keyring.gpg https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg
@@ -25,70 +28,79 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y brave-browser
 
+      # Step 4: Extract BraveSoftware.zip
       - name: Extract BraveSoftware.zip
         run: |
           mkdir -p ~/.config
           7z x -p"${{ secrets.BRAVE_ZIP_PASSWORD }}" BraveSoftware.zip -o~/.config
 
+      # Step 5: Install Cloudflared
       - name: Install Cloudflared
         run: |
           sudo wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
           sudo dpkg -i cloudflared-linux-amd64.deb
 
-      - name: Setup Cloudflare credentials
+      # Step 6: Setup Cloudflare Credentials
+      - name: Setup Cloudflare Credentials
         run: |
           mkdir -p ~/.cloudflared
           echo "${{ secrets.CLOUDFLARE_CERT_PEM }}" > ~/.cloudflared/cert.pem
           chmod 600 ~/.cloudflared/cert.pem
 
+      # Step 7: Start Xvfb
       - name: Start Xvfb
         run: |
           export DISPLAY=:99
           Xvfb :99 -screen 0 1024x768x16 &
 
+      # Step 8: Start x11vnc
       - name: Start x11vnc
         run: |
           export DISPLAY=:99
           x11vnc -display :99 -N -forever -shared &
 
+      # Step 9: Launch Brave Browser
       - name: Launch Brave Browser
         run: |
           export DISPLAY=:99
           nohup brave-browser --no-sandbox "${{ secrets.SECRET_URL }}" &
 
-      - name: Check and Create Cloudflare Tunnel if Needed
+      # Step 10: Check and Create Cloudflare Tunnel if Needed
+      - name: Check and Create Cloudflare Tunnel
         run: |
           if ! cloudflared tunnel list | grep -q "github-actions-tunnel"; then
             echo "Tunnel does not exist. Creating a new tunnel..."
             cloudflared tunnel create github-actions-tunnel
             TUNNEL_ID=$(cloudflared tunnel list | grep "github-actions-tunnel" | awk '{print $1}')
-            echo "Tunnel ID is $TUNNEL_ID"
+            echo "Tunnel ID: $TUNNEL_ID"
 
-            cat << EOF > ~/.cloudflared/config.yml
-tunnel: $TUNNEL_ID
-credentials-file: /home/runner/.cloudflared/$TUNNEL_ID.json
+            # Create config.yml using multiple echo statements for proper indentation
+            mkdir -p ~/.cloudflared
+            echo "tunnel: $TUNNEL_ID" > ~/.cloudflared/config.yml
+            echo "credentials-file: /home/runner/.cloudflared/$TUNNEL_ID.json" >> ~/.cloudflared/config.yml
+            echo "" >> ~/.cloudflared/config.yml
+            echo "ingress:" >> ~/.cloudflared/config.yml
+            echo "  - hostname: vnc.softwarerat.tech" >> ~/.cloudflared/config.yml
+            echo "    service: tcp://localhost:5900" >> ~/.cloudflared/config.yml
+            echo "  - service: http_status:404" >> ~/.cloudflared/config.yml
 
-ingress:
-  - hostname: vnc.softwarerat.tech
-    service: tcp://localhost:5900
-  - service: http_status:404
-EOF
-
-            echo "Config file created for the new tunnel."
+            echo "Cloudflare tunnel configuration created."
           else
             echo "Tunnel already exists. Using existing configuration."
           fi
 
+      # Step 11: Start Cloudflared Tunnel
       - name: Start Cloudflared Tunnel
         run: |
           nohup cloudflared tunnel --config ~/.cloudflared/config.yml run github-actions-tunnel &
-          sleep 10 # Give it time to start
+          sleep 10  # Allow time for the tunnel to establish
 
-      - name: Output Tunnel URL (Custom Domain)
+      # Step 12: Output Tunnel URL (Custom Domain)
+      - name: Output Tunnel URL
         run: |
           echo "The VNC server is available at vnc.softwarerat.tech"
 
-      # Infinite wait step to prevent job completion while keeping services running
-      - name: Wait indefinitely
+      # Step 13: Keep Services Running Indefinitely
+      - name: Keep Services Running
         run: |
           while true; do sleep 1000; done
