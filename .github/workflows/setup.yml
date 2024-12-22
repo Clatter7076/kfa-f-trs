@@ -98,10 +98,19 @@ jobs:
                   return False
                   
               try:
-                  # Get page content and extract captcha URL
-                  page_content = page.content()
-                  captcha_url = page_content.split('<img src="')[1].split('">')[0]
+                  # Wait for the specific captcha image element
+                  captcha_element = page.wait_for_selector('#auth-captcha-image')
+                  if not captcha_element:
+                      print("Captcha element not found")
+                      return False
+                      
+                  # Get the src attribute of the captcha image
+                  captcha_url = captcha_element.get_attribute('src')
                   print(f"Found captcha URL: {captcha_url}")
+                  
+                  if not captcha_url:
+                      print("Could not get captcha URL")
+                      return False
                   
                   # Solve captcha using the extracted URL
                   captcha = AmazonCaptcha.fromlink(captcha_url)
@@ -120,6 +129,9 @@ jobs:
                       
               except Exception as e:
                   print(f"Error during captcha solving: {e}")
+                  # Print the page content for debugging
+                  print("Page content:")
+                  print(page.content())
                   return False
           
           def main():
@@ -165,6 +177,8 @@ jobs:
                   
                   if page.url.startswith('https://www.amazon.de/ap/cvf'):
                       print("Detected captcha page")
+                      print(f"Current URL: {page.url}")
+                      
                       max_attempts = 3
                       for attempt in range(max_attempts):
                           print(f"Captcha solving attempt {attempt + 1}/{max_attempts}")
@@ -175,7 +189,7 @@ jobs:
                           time.sleep(2)  # Wait between attempts
           
                   # 6) Handle 2FA
-                  page.wait_for_selector("#auth-mfa-otpcode")
+                  page.wait_for_selector("#auth-mfa-otpcode", timeout=60000)  # Increased timeout
                   totp = pyotp.TOTP(amazon_totp_secret)
                   code = totp.now()
                   page.fill("#auth-mfa-otpcode", code)
