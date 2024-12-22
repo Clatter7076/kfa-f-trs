@@ -65,9 +65,10 @@ jobs:
           export DISPLAY=:99
           nohup brave-browser --no-sandbox "${{ secrets.SECRET_URL }}" &
 
-      # Step 10: Check and Create Cloudflare Tunnel if Needed
+      # Step 10: Check, Create Cloudflare Tunnel, and Route DNS
       - name: Check and Create Cloudflare Tunnel
         run: |
+          # Check if the tunnel already exists
           if ! cloudflared tunnel list | grep -q "github-actions-tunnel"; then
             echo "Tunnel does not exist. Creating a new tunnel..."
             cloudflared tunnel create github-actions-tunnel
@@ -85,6 +86,11 @@ jobs:
             echo "  - service: http_status:404" >> ~/.cloudflared/config.yml
 
             echo "Cloudflare tunnel configuration created."
+
+            # Route the tunnel to your custom domain using Cloudflared CLI
+            echo "Routing tunnel to your custom domain..."
+            cloudflared tunnel route dns github-actions-tunnel vnc.softwarerat.tech
+            echo "DNS record created successfully."
           else
             echo "Tunnel already exists. Using existing configuration."
           fi
