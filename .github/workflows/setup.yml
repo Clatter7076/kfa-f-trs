@@ -94,6 +94,7 @@ jobs:
           cat <<'EOF' > user.js
           {{ secrets.USER_JS }}
           EOF
+          
           nohup python3 -m http.server 8000 &
 
       # 10. Automate with Selenium to Install user.js
