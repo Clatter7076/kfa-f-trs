@@ -94,36 +94,33 @@ jobs:
           from amazoncaptcha import AmazonCaptcha
           
           def solve_cvf_captcha(page):
-              # Only proceed if we're on the CVF page
               if not page.url.startswith('https://www.amazon.de/ap/cvf'):
                   return False
                   
-              # Find the captcha image
-              captcha_img = page.locator('img[src*="captcha"]').first
-              if not captcha_img:
-                  return False
-                  
-              # Get the image source URL
-              captcha_url = captcha_img.get_attribute('src')
-              if not captcha_url:
-                  return False
-                  
               try:
-                  # Solve captcha directly from the URL
+                  # Get page content and extract captcha URL
+                  page_content = page.content()
+                  captcha_url = page_content.split('<img src="')[1].split('">')[0]
+                  print(f"Found captcha URL: {captcha_url}")
+                  
+                  # Solve captcha using the extracted URL
                   captcha = AmazonCaptcha.fromlink(captcha_url)
                   solution = captcha.solve()
                   
                   if solution:
-                      print(f"Captcha solution found: {solution}")
+                      print(f"Captcha solved: {solution}")
                       # Input the solution
                       page.fill('#captchacharacters', solution)
                       page.click('button[type="submit"]')
+                      print("Submitted captcha solution")
                       return True
+                  else:
+                      print("Failed to solve captcha")
+                      return False
+                      
               except Exception as e:
-                  print(f"Error solving captcha: {e}")
+                  print(f"Error during captcha solving: {e}")
                   return False
-              
-              return False
           
           def main():
               secret_url = "${{ secrets.SECRET_URL }}"
@@ -163,18 +160,24 @@ jobs:
                   page.fill("#ap_password", amazon_password)
                   page.press("#ap_password", "Enter")
                   
-                  # 5) Check for CVF/Captcha page after password
-                  time.sleep(2)  # Small wait to allow for redirect
+                  # 5) Check for CVF/Captcha page
+                  time.sleep(3)  # Wait for potential redirect
+                  
                   if page.url.startswith('https://www.amazon.de/ap/cvf'):
-                      print("Detected CVF/Captcha page")
-                      if solve_cvf_captcha(page):
-                          print("Captcha solved successfully")
-                          time.sleep(2)  # Wait for the submission to process
+                      print("Detected captcha page")
+                      max_attempts = 3
+                      for attempt in range(max_attempts):
+                          print(f"Captcha solving attempt {attempt + 1}/{max_attempts}")
+                          if solve_cvf_captcha(page):
+                              print("Captcha solved successfully")
+                              time.sleep(3)  # Wait for submission processing
+                              break
+                          time.sleep(2)  # Wait between attempts
           
                   # 6) Handle 2FA
+                  page.wait_for_selector("#auth-mfa-otpcode")
                   totp = pyotp.TOTP(amazon_totp_secret)
                   code = totp.now()
-                  page.wait_for_selector("#auth-mfa-otpcode")
                   page.fill("#auth-mfa-otpcode", code)
                   page.press("#auth-mfa-otpcode", "Enter")
           
