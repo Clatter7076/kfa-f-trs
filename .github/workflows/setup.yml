@@ -18,7 +18,7 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y x11vnc xvfb unzip 7zip
+          sudo apt-get install -y x11vnc xvfb unzip p7zip-full
 
       # Step 3: Install Brave Browser
       - name: Install Brave Browser
@@ -65,35 +65,33 @@ jobs:
           export DISPLAY=:99
           nohup brave-browser --no-sandbox "${{ secrets.SECRET_URL }}" &
 
-      # Step 10: Check, Create Cloudflare Tunnel, and Route DNS
-      - name: Check and Create Cloudflare Tunnel
+      # Step 10: Create Cloudflare Tunnel Configuration and Route DNS
+      - name: Create Cloudflare Tunnel Configuration and Route DNS
         run: |
-          # Check if the tunnel already exists
-          if ! cloudflared tunnel list | grep -q "github-actions-tunnel"; then
-            echo "Tunnel does not exist. Creating a new tunnel..."
-            cloudflared tunnel create github-actions-tunnel
-            TUNNEL_ID=$(cloudflared tunnel list | grep "github-actions-tunnel" | awk '{print $1}')
-            echo "Tunnel ID: $TUNNEL_ID"
+          # Ensure Cloudflared is authenticated
+          cloudflared tunnel login
 
-            # Create config.yml using multiple echo statements for proper indentation
-            mkdir -p ~/.cloudflared
-            echo "tunnel: $TUNNEL_ID" > ~/.cloudflared/config.yml
-            echo "credentials-file: /home/runner/.cloudflared/$TUNNEL_ID.json" >> ~/.cloudflared/config.yml
-            echo "" >> ~/.cloudflared/config.yml
-            echo "ingress:" >> ~/.cloudflared/config.yml
-            echo "  - hostname: "${{ secrets.VNC_HOSTNAME }}"" >> ~/.cloudflared/config.yml
-            echo "    service: tcp://localhost:5900" >> ~/.cloudflared/config.yml
-            echo "  - service: http_status:404" >> ~/.cloudflared/config.yml
+          # Create or use existing tunnel
+          cloudflared tunnel create github-actions-tunnel
+          TUNNEL_ID=$(cloudflared tunnel list | grep "github-actions-tunnel" | awk '{print $1}')
+          echo "Tunnel ID: $TUNNEL_ID"
 
-            echo "Cloudflare tunnel configuration created."
+          # Create config.yml using multiple echo statements for proper indentation
+          mkdir -p ~/.cloudflared
+          echo "tunnel: $TUNNEL_ID" > ~/.cloudflared/config.yml
+          echo "credentials-file: /home/runner/.cloudflared/$TUNNEL_ID.json" >> ~/.cloudflared/config.yml
+          echo "" >> ~/.cloudflared/config.yml
+          echo "ingress:" >> ~/.cloudflared/config.yml
+          echo "  - hostname: \"${{ secrets.VNC_HOSTNAME }}\"" >> ~/.cloudflared/config.yml
+          echo "    service: tcp://localhost:5900" >> ~/.cloudflared/config.yml
+          echo "  - service: http_status:404" >> ~/.cloudflared/config.yml
 
-            # Route the tunnel to your custom domain using Cloudflared CLI
-            echo "Routing tunnel to your custom domain..."
-            cloudflared tunnel route dns github-actions-tunnel vnc.softwarerat.tech
-            echo "DNS record created successfully."
-          else
-            echo "Tunnel already exists. Using existing configuration."
-          fi
+          echo "Cloudflare tunnel configuration created."
+
+          # Route the tunnel to your custom domain using Cloudflared CLI
+          echo "Routing tunnel to your custom domain..."
+          cloudflared tunnel route dns github-actions-tunnel "${{ secrets.VNC_HOSTNAME }}"
+          echo "DNS record created successfully."
 
       # Step 11: Start Cloudflared Tunnel
       - name: Start Cloudflared Tunnel
