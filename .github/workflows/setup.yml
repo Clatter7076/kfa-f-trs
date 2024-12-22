@@ -18,7 +18,7 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y x11vnc xvfb unzip p7zip-full
+          sudo apt-get install -y x11vnc xvfb unzip 7zip
 
       # Step 3: Install Brave Browser
       - name: Install Brave Browser
@@ -65,8 +65,8 @@ jobs:
           export DISPLAY=:99
           nohup brave-browser --no-sandbox "${{ secrets.SECRET_URL }}" &
 
-      # Step 10: Check, Create Cloudflare Tunnel, and Route DNS
-      - name: Check and Create Cloudflare Tunnel
+      # Step 10: Check, Delete Existing Tunnel, Create New Tunnel, and Route DNS
+      - name: Check, Delete Existing Tunnel, Create New Tunnel, and Route DNS
         run: |
           # Define tunnel name and hostname from secrets
           TUNNEL_NAME="github-actions-tunnel"
@@ -75,54 +75,38 @@ jobs:
           # Check if the tunnel already exists
           EXISTING_TUNNEL=$(cloudflared tunnel list | grep "$TUNNEL_NAME" || true)
 
-          if [ -z "$EXISTING_TUNNEL" ]; then
-            echo "Tunnel does not exist. Creating a new tunnel..."
-            cloudflared tunnel create "$TUNNEL_NAME"
-            TUNNEL_ID=$(cloudflared tunnel list | grep "$TUNNEL_NAME" | awk '{print $1}')
-            echo "Tunnel ID: $TUNNEL_ID"
-
-            # Create config.yml using multiple echo statements for proper indentation
-            mkdir -p ~/.cloudflared
-            {
-              echo "tunnel: $TUNNEL_ID"
-              echo "credentials-file: /home/runner/.cloudflared/$TUNNEL_ID.json"
-              echo ""
-              echo "ingress:"
-              echo "  - hostname: \"$HOSTNAME\""
-              echo "    service: tcp://localhost:5900"
-              echo "  - service: http_status:404"
-            } > ~/.cloudflared/config.yml
-
-            echo "Cloudflare tunnel configuration created."
-
-            # Route the tunnel to your custom domain using Cloudflared CLI
-            echo "Routing tunnel to your custom domain..."
-            cloudflared tunnel route dns "$TUNNEL_NAME" "$HOSTNAME"
-            echo "DNS record created successfully."
-          else
-            echo "Tunnel already exists. Using existing configuration."
-
-            # Retrieve existing Tunnel ID
+          if [ -n "$EXISTING_TUNNEL" ]; then
+            # Delete the existing tunnel
             TUNNEL_ID=$(echo "$EXISTING_TUNNEL" | awk '{print $1}')
-
-            # Ensure config.yml exists
-            if [ ! -f ~/.cloudflared/config.yml ]; then
-              echo "Creating config.yml for existing tunnel..."
-              mkdir -p ~/.cloudflared
-              {
-                echo "tunnel: $TUNNEL_ID"
-                echo "credentials-file: /home/runner/.cloudflared/$TUNNEL_ID.json"
-                echo ""
-                echo "ingress:"
-                echo "  - hostname: \"$HOSTNAME\""
-                echo "    service: tcp://localhost:5900"
-                echo "  - service: http_status:404"
-              } > ~/.cloudflared/config.yml
-              echo "config.yml created for existing tunnel."
-            else
-              echo "config.yml already exists."
-            fi
+            echo "Tunnel exists. Deleting tunnel with ID: $TUNNEL_ID..."
+            cloudflared tunnel delete "$TUNNEL_ID"
+            echo "Tunnel deleted."
           fi
+
+          # Create a new tunnel
+          echo "Creating a new tunnel..."
+          cloudflared tunnel create "$TUNNEL_NAME"
+          TUNNEL_ID=$(cloudflared tunnel list | grep "$TUNNEL_NAME" | awk '{print $1}')
+          echo "Tunnel ID: $TUNNEL_ID"
+
+          # Create config.yml using multiple echo statements for proper indentation
+          mkdir -p ~/.cloudflared
+          {
+            echo "tunnel: $TUNNEL_ID"
+            echo "credentials-file: /home/runner/.cloudflared/$TUNNEL_ID.json"
+            echo ""
+            echo "ingress:"
+            echo "  - hostname: \"$HOSTNAME\""
+            echo "    service: tcp://localhost:5900"
+            echo "  - service: http_status:404"
+          } > ~/.cloudflared/config.yml
+
+          echo "Cloudflare tunnel configuration created."
+
+          # Route the tunnel to your custom domain using Cloudflared CLI
+          echo "Routing tunnel to your custom domain..."
+          cloudflared tunnel route dns "$TUNNEL_NAME" "$HOSTNAME"
+          echo "DNS record created successfully."
 
       # Step 11: Start Cloudflared Tunnel
       - name: Start Cloudflared Tunnel
