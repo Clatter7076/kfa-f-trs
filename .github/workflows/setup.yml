@@ -70,10 +70,10 @@ jobs:
       - name: Download Violentmonkey
         run: |
           mkdir -p /tmp/extensions
-          wget -O /tmp/extensions/violentmonkey.zip \
+          wget -O /tmp/extensions/violentmonkey.crx \
             "https://clients2.google.com/service/update2/crx?response=redirect&acceptformat=crx2,crx3&prodversion=100&x=id%3Djinjaccalgkegednnccohejagnlnfdag%26installsource%3Dondemand%26uc"
           # Extract the CRX to a folder (required by Playwright)
-          cd /tmp/extensions && unzip violentmonkey.zip
+          cd /tmp/extensions && python ${{ github.workspace }}/uncrx.py violentmonkey.crx
 
       # 9. Serve user.js Locally
       - name: Serve user.js Locally
