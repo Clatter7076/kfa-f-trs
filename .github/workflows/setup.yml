@@ -11,10 +11,8 @@ jobs:
       # Step 1: Checkout the main repository
       - name: Checkout Repository
         uses: actions/checkout@v4
-        with:
-          lfs: false
 
-      # Step 2: Install necessary dependencies
+      # Step 2: Install Dependencies
       - name: Install Dependencies
         run: |
           sudo apt-get update
@@ -33,32 +31,14 @@ jobs:
         run: |
           sudo pip3 install selenium pyotp
 
-      # Step 5: Install Cloudflared
-      - name: Install Cloudflared
-        run: |
-          sudo wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
-          sudo dpkg -i cloudflared-linux-amd64.deb
-
-      # Step 6: Setup Cloudflare Credentials
-      - name: Setup Cloudflare Credentials
-        run: |
-          mkdir -p ~/.cloudflared
-          echo "${{ secrets.CLOUDFLARE_CERT_PEM }}" > ~/.cloudflared/cert.pem
-          chmod 600 ~/.cloudflared/cert.pem
-
-      # Step 7: Start Xvfb
-      - name: Start Xvfb
+      # Step 5: Setup and Start Xvfb and x11vnc
+      - name: Setup and Start Xvfb and x11vnc
         run: |
           export DISPLAY=:99
           Xvfb :99 -screen 0 1024x768x16 &
-
-      # Step 8: Start x11vnc
-      - name: Start x11vnc
-        run: |
-          export DISPLAY=:99
           x11vnc -display :99 -N -forever -shared &
 
-      # Step 9: Create or Modify GroupPolicy.json for Brave
+      # Step 6: Create or Modify GroupPolicy.json for Brave
       - name: Create or Modify GroupPolicy.json
         run: |
           sudo mkdir -p /etc/brave/policies/managed
@@ -86,70 +66,18 @@ jobs:
             "NewTabPageLocation": "about:blank"
           }' | sudo tee /etc/brave/policies/managed/GroupPolicy.json
 
-      # Step 10: Launch Brave Browser
-      - name: Launch Brave Browser
-        run: |
-          export DISPLAY=:99
-          nohup brave-browser --no-sandbox "${{ secrets.SECRET_URL }}" &
-
-      # Step 11: Check, Delete Existing Tunnel, Create New Tunnel, and Route DNS
-      - name: Check, Delete Existing Tunnel, Create New Tunnel, and Route DNS
-        run: |
-          # Define tunnel name and hostname from secrets
-          TUNNEL_NAME="github-actions-tunnel"
-          HOSTNAME="${{ secrets.VNC_HOSTNAME }}"
-
-          # Check if the tunnel already exists
-          EXISTING_TUNNEL=$(cloudflared tunnel list | grep "$TUNNEL_NAME" || true)
-
-          if [ -n "$EXISTING_TUNNEL" ]; then
-            # Delete the existing tunnel
-            TUNNEL_ID=$(echo "$EXISTING_TUNNEL" | awk '{print $1}')
-            echo "Tunnel exists. Deleting tunnel with ID: $TUNNEL_ID..."
-            cloudflared tunnel delete "$TUNNEL_ID"
-            echo "Tunnel deleted."
-          fi
-
-          # Create a new tunnel
-          echo "Creating a new tunnel..."
-          cloudflared tunnel create "$TUNNEL_NAME"
-          TUNNEL_ID=$(cloudflared tunnel list | grep "$TUNNEL_NAME" | awk '{print $1}')
-          echo "Tunnel ID: $TUNNEL_ID"
-
-          # Create config.yml using multiple echo statements for proper indentation
-          mkdir -p ~/.cloudflared
-          {
-            echo "tunnel: $TUNNEL_ID"
-            echo "credentials-file: /home/runner/.cloudflared/$TUNNEL_ID.json"
-            echo ""
-            echo "ingress:"
-            echo "  - hostname: \"$HOSTNAME\""
-            echo "    service: tcp://localhost:5900"
-            echo "  - service: http_status:404"
-          } > ~/.cloudflared/config.yml
-
-          echo "Cloudflare tunnel configuration created."
-
-          # Route the tunnel to your custom domain using Cloudflared CLI with --overwrite-dns option
-          echo "Routing tunnel to your custom domain..."
-          cloudflared tunnel route dns --overwrite-dns "$TUNNEL_NAME" "$HOSTNAME"
-          echo "DNS record created successfully."
-
-      # Step 12: Start Cloudflared Tunnel
-      - name: Start Cloudflared Tunnel
-        run: |
-          nohup cloudflared tunnel --config ~/.cloudflared/config.yml run github-actions-tunnel &
-          sleep 10  # Allow time for the tunnel to establish
-
-      # Step 13: Serve user.js Script Locally
+      # Step 7: Serve user.js Script Locally
       - name: Serve user.js Script Locally
         run: |
           echo "${{ secrets.USER_JS }}" > user.js
           nohup python3 -m http.server 8000 &
 
-      # Step 14: Automatically Login to Luna and Install user.js via Violentmonkey
-      - name: Automatically Login to Luna and Install user.js
+      # Step 8: Launch Brave Browser and Automate Login
+      - name: Launch Brave Browser and Automate Login
         run: |
+          export DISPLAY=:99
+          nohup brave-browser --no-sandbox "${{ secrets.SECRET_URL }}" &
+          sleep 10  # Allow time for the browser to launch
           echo 'import time
           import pyotp
           from selenium import webdriver
@@ -195,7 +123,6 @@ jobs:
           driver.get("http://localhost:8000/user.js")
 
           # Wait for the Violentmonkey installation prompt and accept it
-          # Note: You may need to adjust the following lines based on how Violentmonkey's prompt is structured
           install_button = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Install')]")))
           install_button.click()
 
@@ -204,7 +131,56 @@ jobs:
               time.sleep(1000)' > automate_login.py
           python3 automate_login.py
 
-      # Step 15: Keep Services Running Indefinitely
+      # Step 9: Check, Delete Existing Tunnel, Create New Tunnel, and Route DNS
+      - name: Check, Delete Existing Tunnel, Create New Tunnel, and Route DNS
+        run: |
+          # Define tunnel name and hostname from secrets
+          TUNNEL_NAME="github-actions-tunnel"
+          HOSTNAME="${{ secrets.VNC_HOSTNAME }}"
+
+          # Check if the tunnel already exists
+          EXISTING_TUNNEL=$(cloudflared tunnel list | grep "$TUNNEL_NAME" || true)
+
+          if [ -n "$EXISTING_TUNNEL" ]; then
+            # Delete the existing tunnel
+            TUNNEL_ID=$(echo "$EXISTING_TUNNEL" | awk '{print $1}')
+            echo "Tunnel exists. Deleting tunnel with ID: $TUNNEL_ID..."
+            cloudflared tunnel delete "$TUNNEL_ID"
+            echo "Tunnel deleted."
+          fi
+
+          # Create a new tunnel
+          echo "Creating a new tunnel..."
+          cloudflared tunnel create "$TUNNEL_NAME"
+          TUNNEL_ID=$(cloudflared tunnel list | grep "$TUNNEL_NAME" | awk '{print $1}')
+          echo "Tunnel ID: $TUNNEL_ID"
+
+          # Create config.yml using multiple echo statements for proper indentation
+          mkdir -p ~/.cloudflared
+          {
+            echo "tunnel: $TUNNEL_ID"
+            echo "credentials-file: /home/runner/.cloudflared/$TUNNEL_ID.json"
+            echo ""
+            echo "ingress:"
+            echo "  - hostname: \"$HOSTNAME\""
+            echo "    service: tcp://localhost:5900"
+            echo "  - service: http_status:404"
+          } > ~/.cloudflared/config.yml
+
+          echo "Cloudflare tunnel configuration created."
+
+          # Route the tunnel to your custom domain using Cloudflared CLI with --overwrite-dns option
+          echo "Routing tunnel to your custom domain..."
+          cloudflared tunnel route dns --overwrite-dns "$TUNNEL_NAME" "$HOSTNAME"
+          echo "DNS record created successfully."
+
+      # Step 10: Start Cloudflared Tunnel
+      - name: Start Cloudflared Tunnel
+        run: |
+          nohup cloudflared tunnel --config ~/.cloudflared/config.yml run github-actions-tunnel &
+          sleep 10  # Allow time for the tunnel to establish
+
+      # Step 11: Keep Services Running Indefinitely
       - name: Keep Services Running
         run: |
           while true; do sleep 1000; done
