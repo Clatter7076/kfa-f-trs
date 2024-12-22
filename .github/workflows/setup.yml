@@ -90,28 +90,39 @@ jobs:
           cat <<EOF > automate_browser.py
           import time
           import pyotp
-          import tempfile
           from playwright.sync_api import sync_playwright
           from amazoncaptcha import AmazonCaptcha
           
-          def solve_captcha(page):
-              # Find and screenshot the captcha image
-              captcha_element = page.wait_for_selector('img[src*="captcha"]')
-              if not captcha_element:
-                  return None
+          def solve_cvf_captcha(page):
+              # Only proceed if we're on the CVF page
+              if not page.url.startswith('https://www.amazon.de/ap/cvf'):
+                  return False
                   
-              # Create a temporary file for the captcha image
-              with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp_file:
-                  captcha_element.screenshot(path=tmp_file.name)
-                  # Solve the captcha
-                  captcha = AmazonCaptcha.from_file(tmp_file.name)
+              # Find the captcha image
+              captcha_img = page.locator('img[src*="captcha"]').first
+              if not captcha_img:
+                  return False
+                  
+              # Get the image source URL
+              captcha_url = captcha_img.get_attribute('src')
+              if not captcha_url:
+                  return False
+                  
+              try:
+                  # Solve captcha directly from the URL
+                  captcha = AmazonCaptcha.fromlink(captcha_url)
                   solution = captcha.solve()
                   
                   if solution:
-                      # Find the captcha input field and submit
+                      print(f"Captcha solution found: {solution}")
+                      # Input the solution
                       page.fill('#captchacharacters', solution)
                       page.click('button[type="submit"]')
                       return True
+              except Exception as e:
+                  print(f"Error solving captcha: {e}")
+                  return False
+              
               return False
           
           def main():
@@ -142,52 +153,32 @@ jobs:
                   page.wait_for_selector("#item_secondary_nav_button_sign_in")
                   page.click("#item_secondary_nav_button_sign_in")
           
-                  # 3) Amazon login with captcha handling
+                  # 3) Enter email
                   page.wait_for_selector("#ap_email")
                   page.fill("#ap_email", amazon_email)
                   page.press("#ap_email", "Enter")
-                  
-                  # Check for captcha after email
-                  try:
-                      if page.locator('img[src*="captcha"]').is_visible(timeout=3000):
-                          solve_captcha(page)
-                  except:
-                      pass
           
+                  # 4) Enter password
                   page.wait_for_selector("#ap_password")
                   page.fill("#ap_password", amazon_password)
                   page.press("#ap_password", "Enter")
                   
-                  # Check for captcha after password
-                  try:
-                      if page.locator('img[src*="captcha"]').is_visible(timeout=3000):
-                          solve_captcha(page)
-                  except:
-                      pass
+                  # 5) Check for CVF/Captcha page after password
+                  time.sleep(2)  # Small wait to allow for redirect
+                  if page.url.startswith('https://www.amazon.de/ap/cvf'):
+                      print("Detected CVF/Captcha page")
+                      if solve_cvf_captcha(page):
+                          print("Captcha solved successfully")
+                          time.sleep(2)  # Wait for the submission to process
           
-                  # 4) TOTP/2FA
+                  # 6) Handle 2FA
                   totp = pyotp.TOTP(amazon_totp_secret)
                   code = totp.now()
-                  
-                  # Handle possible captcha before 2FA
-                  try:
-                      if page.locator('img[src*="captcha"]').is_visible(timeout=3000):
-                          solve_captcha(page)
-                  except:
-                      pass
-                      
                   page.wait_for_selector("#auth-mfa-otpcode")
                   page.fill("#auth-mfa-otpcode", code)
                   page.press("#auth-mfa-otpcode", "Enter")
           
-                  # Final captcha check after 2FA
-                  try:
-                      if page.locator('img[src*="captcha"]').is_visible(timeout=3000):
-                          solve_captcha(page)
-                  except:
-                      pass
-          
-                  # 5) Open user.js in new tab to install script
+                  # 7) Open user.js in new tab to install script
                   install_page = context.new_page()
                   install_page.goto("http://localhost:8000/user.js")
                   install_button = install_page.wait_for_selector("xpath=//button[contains(text(), 'Install')]")
@@ -195,7 +186,7 @@ jobs:
                   time.sleep(2)
                   install_page.close()
           
-                  # 6) Refresh main page
+                  # 8) Refresh main page
                   page.bring_to_front()
                   page.reload()
                   time.sleep(3)
