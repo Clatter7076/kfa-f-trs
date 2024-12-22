@@ -3,7 +3,7 @@ name: Setup and Automate Browser Operations
 on:
   push:
     branches:
-      - main  # Trigger the workflow on pushes to the main branch
+      - main
 
 jobs:
   setup-and-launch:
@@ -11,18 +11,18 @@ jobs:
     timeout-minutes: 60
 
     steps:
-      # Step 1: Check out repository
+      # Step 1: Checkout
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # Step 2: Set up Python
-      - name: Set Up Python
+      # Step 2: Setup Python
+      - name: Setup Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
 
       # Step 3: Install System Dependencies
-      - name: Install System Dependencies
+      - name: Install Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -34,18 +34,16 @@ jobs:
             gnupg \
             libxss1 \
             libappindicator3-1 \
-            libindicator7
+            libindicator7 \
+            libnss3 \
+            libgbm-dev \
+            libasound2
 
-      # Step 4: Install Brave Browser
-      - name: Install Brave Browser
+      # Step 4: Install Brave
+      - name: Install Brave
         run: |
-          # Add Brave's GPG key
           sudo curl -fsSLo /usr/share/keyrings/brave-browser-archive-keyring.gpg https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg
-
-          # Add Brave's repository
           echo "deb [signed-by=/usr/share/keyrings/brave-browser-archive-keyring.gpg] https://brave-browser-apt-release.s3.brave.com/ stable main" | sudo tee /etc/apt/sources.list.d/brave-browser-release.list
-
-          # Update and install Brave
           sudo apt-get update
           sudo apt-get install -y brave-browser
 
@@ -68,144 +66,114 @@ jobs:
           echo "${{ secrets.CLOUDFLARE_CERT_PEM }}" > ~/.cloudflared/cert.pem
           chmod 600 ~/.cloudflared/cert.pem
 
-      # Step 8: Start Virtual Display and VNC Server
-      - name: Start Virtual Display and VNC Server
+      # Step 8: Start Xvfb and x11vnc
+      - name: Start Virtual Display and VNC
         run: |
           export DISPLAY=:99
           Xvfb :99 -screen 0 1920x1080x24 &
           x11vnc -display :99 -N -forever -shared &
-          sleep 5  # Give Xvfb and x11vnc a few seconds to stabilize
+          sleep 5
 
-      # Step 9: Serve user.js Locally (Temporary)
       - name: Serve user.js Locally
         run: |
-          echo "${{ secrets.USER_JS }}" > user.js
+          # Write the user.js file using 'cat' and a heredoc
+          cat <<'EOF' > user.js
+          {{ secrets.USER_JS }}
+          EOF
+      
+          # Start a local web server to serve user.js
           nohup python3 -m http.server 8000 &
 
-      # Step 10: Run Selenium Automation to Install user.js via Violentmonkey
-      - name: Login and Install user.js with Selenium
+      # Step 10: Automate with Selenium to Install user.js
+      - name: Install user.js via Violentmonkey
         run: |
           cat <<'EOF' > automate_brave.py
           import time
           import pyotp
           from selenium import webdriver
+          from selenium.webdriver.chrome.options import Options
           from selenium.webdriver.common.by import By
           from selenium.webdriver.common.keys import Keys
           from selenium.webdriver.support.ui import WebDriverWait
           from selenium.webdriver.support import expected_conditions as EC
-          from selenium.webdriver.chrome.options import Options
-
+          
           def main():
-              # Setup ChromeOptions to use Brave
+              # Configure ChromeOptions for Brave
               options = Options()
               options.binary_location = "/usr/bin/brave-browser"
-              # Use the Visual display so we can see it in VNC
-              options.add_argument("--disable-dev-shm-usage")
+          
+              # Attempt to avoid DevToolsActivePort issues or crashes
               options.add_argument("--no-sandbox")
-              # If you'd like to hide the UI, uncomment:
-              # options.add_argument("--headless")
-
+              options.add_argument("--disable-dev-shm-usage")
+              options.add_argument("--disable-gpu")
+              options.add_argument("--remote-debugging-port=9222")
+              # Provide a user-data-dir to keep Brave from crashing on ephemeral environment
+              options.add_argument("--user-data-dir=/tmp/brave_user_data")
+          
               driver = webdriver.Chrome(options=options)
               wait = WebDriverWait(driver, 30)
-
+          
               try:
-                  # 1) Navigate to your secret URL (e.g., amazon / luna)
+                  # 1) Go to your secret URL (e.g. Amazon Luna)
                   driver.get("${{ secrets.SECRET_URL }}")
-
-                  # 2) Log into Amazon
-                  email_field = wait.until(
-                      EC.presence_of_element_located((By.ID, "ap_email"))
-                  )
+          
+                  # 2) Log in
+                  email_field = wait.until(EC.presence_of_element_located((By.ID, "ap_email")))
                   email_field.send_keys("${{ secrets.AMAZON_EMAIL }}")
                   email_field.send_keys(Keys.RETURN)
-
-                  password_field = wait.until(
-                      EC.presence_of_element_located((By.ID, "ap_password"))
-                  )
+          
+                  password_field = wait.until(EC.presence_of_element_located((By.ID, "ap_password")))
                   password_field.send_keys("${{ secrets.AMAZON_PASSWORD }}")
                   password_field.send_keys(Keys.RETURN)
-
-                  # 3) TOTP Auth
+          
+                  # 3) TOTP/2FA
                   totp = pyotp.TOTP("${{ secrets.AMAZON_TOTP_SECRET }}")
                   code = totp.now()
-
-                  otp_field = wait.until(
-                      EC.presence_of_element_located((By.ID, "auth-mfa-otpcode"))
-                  )
+                  otp_field = wait.until(EC.presence_of_element_located((By.ID, "auth-mfa-otpcode")))
                   otp_field.send_keys(code)
                   otp_field.send_keys(Keys.RETURN)
-
-                  # 4) Install user.js using Violentmonkey prompt
+          
+                  # 4) Open user.js in new tab
                   driver.execute_script("window.open('http://localhost:8000/user.js','_blank');")
                   time.sleep(2)
                   driver.switch_to.window(driver.window_handles[-1])
-
-                  # Wait for the "Install" button
-                  install_button = wait.until(
+          
+                  # 5) Click "Install" in Violentmonkey
+                  install_btn = wait.until(
                       EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Install')]"))
                   )
-                  install_button.click()
+                  install_btn.click()
+          
+                  # Close that tab
                   time.sleep(2)
-
-                  # Close the Violentmonkey tab
                   driver.close()
+          
+                  # Switch back to the main tab
                   driver.switch_to.window(driver.window_handles[0])
-
-                  # Refresh the original page to apply the new user.js
+          
+                  # Reload to ensure user.js is active
                   driver.refresh()
-                  print("Selenium tasks completed. user.js installed successfully.")
-                  time.sleep(5)
-
+                  time.sleep(3)
+                  print("User.js installed successfully via Violentmonkey.")
               except Exception as ex:
                   print(f"[Error] {ex}")
-
               finally:
-                  driver.quit()  # Close the Selenium-driven Brave instance
-
+                  # Close Selenium to end automation
+                  driver.quit()
+          
           if __name__ == "__main__":
               main()
           EOF
-
           python3 automate_brave.py
 
-      # Step 11: Configure Brave Browser Policies (Optional)
-      - name: Configure Brave Browser Policies
-        run: |
-          sudo mkdir -p /etc/brave/policies/managed
-          sudo tee /etc/brave/policies/managed/GroupPolicy.json > /dev/null <<EOL
-          {
-            "ExtensionSettings": {
-              "*": {
-                "installation_mode": "blocked"
-              },
-              "cjpalhdlnbpafiamejdnhcphjbkeiagm": {
-                "installation_mode": "force_installed",
-                "update_url": "https://clients2.google.com/service/update2/crx"
-              },
-              "jinjaccalgkegednnccohejagnlnfdag": {
-                "installation_mode": "force_installed",
-                "update_url": "https://clients2.google.com/service/update2/crx"
-              }
-            },
-            "TorDisabled": true,
-            "BraveVPNDisabled": true,
-            "BraveRewardsDisabled": true,
-            "BraveWalletDisabled": true,
-            "MetricsReportingEnabled": false,
-            "DefaultBrowserSettingEnabled": false,
-            "HomepageIsNewTabPage": true,
-            "NewTabPageLocation": "about:blank"
-          }
-          EOL
-
-      # Step 12: Launch Brave in Non-Selenium Mode
-      - name: Launch Regular Brave
+      # Step 11: Launch Regular Brave (non-Selenium) 
+      - name: Launch Brave
         run: |
           export DISPLAY=:99
           nohup brave-browser --no-sandbox "${{ secrets.SECRET_URL }}" &
 
-      # Step 13: Manage Cloudflare Tunnel
-      - name: Manage Cloudflare Tunnel
+      # Step 12: Manage Cloudflared Tunnel
+      - name: Manage Cloudflared Tunnel
         run: |
           TUNNEL_NAME="github-actions-tunnel"
           HOSTNAME="${{ secrets.VNC_HOSTNAME }}"
@@ -213,14 +181,13 @@ jobs:
           EXISTING_TUNNEL=$(cloudflared tunnel list | grep "$TUNNEL_NAME" || true)
           if [ -n "$EXISTING_TUNNEL" ]; then
             TUNNEL_ID=$(echo "$EXISTING_TUNNEL" | awk '{print $1}')
-            echo "Existing tunnel found: $TUNNEL_ID. Deleting..."
+            echo "Existing tunnel: $TUNNEL_ID. Deleting..."
             cloudflared tunnel delete "$TUNNEL_ID"
-            echo "Tunnel deleted."
           fi
 
+          # Create new
           cloudflared tunnel create "$TUNNEL_NAME"
           TUNNEL_ID=$(cloudflared tunnel list | grep "$TUNNEL_NAME" | awk '{print $1}')
-          echo "Created new tunnel: $TUNNEL_ID"
 
           mkdir -p ~/.cloudflared
           cat <<EOL > ~/.cloudflared/config.yml
@@ -234,16 +201,15 @@ jobs:
           EOL
 
           cloudflared tunnel route dns --overwrite-dns "$TUNNEL_NAME" "$HOSTNAME"
-          echo "DNS record created for $HOSTNAME"
 
-      # Step 14: Start Cloudflared Tunnel
-      - name: Start Cloudflared Tunnel
+      # Step 13: Start Cloudflared
+      - name: Start Cloudflared
         run: |
           nohup cloudflared tunnel --config ~/.cloudflared/config.yml run "github-actions-tunnel" &
           sleep 10
 
-      # Step 15: Keep Services Running
-      - name: Keep Services Running
+      # Step 14: Keep Running
+      - name: Keep Service Running
         run: |
-          echo "All tasks completed. Keeping the job alive..."
+          echo "Workflow complete; keeping container alive..."
           while true; do sleep 1000; done
