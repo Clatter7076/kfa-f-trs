@@ -85,67 +85,30 @@ jobs:
 
       # 10. Automate with Playwright
       - name: Install user.js via Violentmonkey
+        env:
+          AZ_COOKIES: ${{ secrets.AZ_COOKIES }}
         run: |
           export DISPLAY=:99
           cat <<EOF > automate_browser.py
           import time
-          import pyotp
-          import sys
+          import json
+          import os
           from playwright.sync_api import sync_playwright
-          from amazoncaptcha import AmazonCaptcha
-          
-          def check_password_error(page):
-              error_box = page.locator('#auth-error-message-box')
-              if error_box.is_visible():
-                  error_text = error_box.inner_text()
-                  if "Falsches Passwort" in error_text:
-                      print("Error: Wrong password. Please check your credentials.")
-                      sys.exit(1)
-          
-          def solve_cvf_captcha(page):
-              if not page.url.startswith('https://www.amazon.de/ap/cvf'):
-                  return False
-                  
-              try:
-                  # Wait for and find the captcha image using the alt attribute
-                  captcha_element = page.wait_for_selector('img[alt="captcha"]')
-                  if not captcha_element:
-                      print("Captcha element not found")
-                      return False
-                      
-                  # Get the src attribute of the captcha image
-                  captcha_url = captcha_element.get_attribute('src')
-                  print(f"Found captcha URL: {captcha_url}")
-                  
-                  if not captcha_url:
-                      print("Could not get captcha URL")
-                      return False
-                  
-                  # Solve captcha using the extracted URL
-                  captcha = AmazonCaptcha.fromlink(captcha_url)
-                  solution = captcha.solve()
-                  
-                  if solution:
-                      print(f"Captcha solved: {solution}")
-                      # Input the solution
-                      page.fill('#captchacharacters', solution)
-                      page.click('button[type="submit"]')
-                      print("Submitted captcha solution")
-                      return True
-                  else:
-                      print("Failed to solve captcha")
-                      return False
-                      
-              except Exception as e:
-                  print(f"Error during captcha solving: {e}")
-                  print("Current page URL:", page.url)
-                  return False
-          
+
           def main():
               secret_url = "${{ secrets.SECRET_URL }}"
-              amazon_email = "${{ secrets.AMAZON_EMAIL }}"
-              amazon_password = "${{ secrets.AMAZON_PASSWORD }}"
-              amazon_totp_secret = "${{ secrets.AMAZON_TOTP_SECRET }}"
+              
+              # Get cookies from environment variable
+              cookies_json = os.getenv('AZ_COOKIES')
+              if not cookies_json:
+                  print("Error: No cookies found in environment variables")
+                  return
+                  
+              try:
+                  cookies = json.loads(cookies_json)
+              except json.JSONDecodeError as e:
+                  print(f"Error parsing cookies JSON: {e}")
+                  return
           
               with sync_playwright() as p:
                   context = p.chromium.launch_persistent_context(
@@ -162,53 +125,30 @@ jobs:
                   
                   page = context.new_page()
                   
-                  # 1) Navigate to secret URL
+                  # Add cookies before navigating to the site
+                  try:
+                      context.add_cookies(cookies)
+                      print("Added authentication cookies")
+                  except Exception as e:
+                      print(f"Error adding cookies: {e}")
+                      context.close()
+                      return
+                  
+                  # Navigate to secret URL
+                  print("Navigating to target URL...")
                   page.goto(secret_url)
-          
-                  # 2) Click the sign-in button
-                  page.wait_for_selector("#item_secondary_nav_button_sign_in")
-                  page.click("#item_secondary_nav_button_sign_in")
-          
-                  # 3) Enter email
-                  page.wait_for_selector("#ap_email")
-                  page.fill("#ap_email", amazon_email)
-                  page.press("#ap_email", "Enter")
-          
-                  # 4) Enter password
-                  page.wait_for_selector("#ap_password")
-                  page.fill("#ap_password", amazon_password)
-                  page.press("#ap_password", "Enter")
+                  time.sleep(3)  # Wait for page to load
                   
-                  # Wait a moment for any error messages
-                  time.sleep(2)
-                  
-                  # Check for password error
-                  check_password_error(page)
-                  
-                  # 5) Check for CVF/Captcha page
-                  time.sleep(3)  # Wait for potential redirect
-                  
-                  if page.url.startswith('https://www.amazon.de/ap/cvf'):
-                      print("Detected captcha page")
-                      print(f"Current URL: {page.url}")
+                  # Verify we're logged in by checking for typical logged-out elements
+                  sign_in_button = page.locator("#item_secondary_nav_button_sign_in")
+                  if sign_in_button.is_visible():
+                      print("Error: Not logged in. Cookie authentication failed.")
+                      context.close()
+                      return
                       
-                      max_attempts = 3
-                      for attempt in range(max_attempts):
-                          print(f"Captcha solving attempt {attempt + 1}/{max_attempts}")
-                          if solve_cvf_captcha(page):
-                              print("Captcha solved successfully")
-                              time.sleep(3)  # Wait for submission processing
-                              break
-                          time.sleep(2)  # Wait between attempts
-          
-                  # 6) Handle 2FA
-                  page.wait_for_selector("#auth-mfa-otpcode", timeout=60000)  # Increased timeout
-                  totp = pyotp.TOTP(amazon_totp_secret)
-                  code = totp.now()
-                  page.fill("#auth-mfa-otpcode", code)
-                  page.press("#auth-mfa-otpcode", "Enter")
-          
-                  # 7) Open user.js in new tab to install script
+                  print("Successfully logged in with cookies")
+                  
+                  # Open user.js in new tab to install script
                   install_page = context.new_page()
                   install_page.goto("http://localhost:8000/user.js")
                   install_button = install_page.wait_for_selector("xpath=//button[contains(text(), 'Install')]")
@@ -216,7 +156,7 @@ jobs:
                   time.sleep(2)
                   install_page.close()
           
-                  # 8) Refresh main page
+                  # Refresh main page
                   page.bring_to_front()
                   page.reload()
                   time.sleep(3)
