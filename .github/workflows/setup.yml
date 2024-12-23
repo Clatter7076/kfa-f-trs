@@ -89,6 +89,7 @@ jobs:
       - name: Setup Browsers
         env:
           AZ_COOKIES: ${{ secrets.AZ_COOKIES }}
+          DISPLAY: :99
         run: |
           # Create a cookies file for Chromium
           echo "$AZ_COOKIES" > /tmp/cookies.json
