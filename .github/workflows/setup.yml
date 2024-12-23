@@ -89,8 +89,8 @@ jobs:
       - name: Install user.js via Violentmonkey
         env:
           AZ_COOKIES: ${{ secrets.AZ_COOKIES }}
+          DISPLAY: :99
         run: |
-          export DISPLAY=:99
           cat <<EOF > automate_browser.py
           import time
           import json
@@ -137,7 +137,14 @@ jobs:
                           "--no-sandbox",
                           "--start-maximized",
                           "--disable-dev-shm-usage",
-                          "--load-extension=/tmp/extensions/violentmonkey"
+                          "--load-extension=/tmp/extensions/violentmonkey",
+                          "--enable-extensions",
+                          "--extensions-on-chrome-urls",
+                          "--disable-extensions-http-throttling",
+                          "--enable-chrome-browser-cloud-management",
+                          "--extensions-install-verification",
+                          "--enable-manual-extension-installation",
+                          "--force-dev-mode-highlighting"
                       ],
                       viewport={"width": 1920, "height": 1080}
                   )
@@ -218,6 +225,13 @@ jobs:
             --user-data-dir=/tmp/chrome-data \
             --load-extension=/tmp/extensions/violentmonkey \
             --password-store=basic \
+            --enable-extensions \
+            --extensions-on-chrome-urls \
+            --disable-extensions-http-throttling \
+            --enable-chrome-browser-cloud-management \
+            --extensions-install-verification \
+            --enable-manual-extension-installation \
+            --force-dev-mode-highlighting \
             "${{ secrets.SECRET_URL }}" &
           
           # Wait for browser to start
