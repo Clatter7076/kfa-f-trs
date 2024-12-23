@@ -144,7 +144,8 @@ jobs:
                           "--enable-chrome-browser-cloud-management",
                           "--extensions-install-verification",
                           "--enable-manual-extension-installation",
-                          "--force-dev-mode-highlighting"
+                          "--force-dev-mode-highlighting",
+                          "--force-fieldtrials=ExtensionDeveloperModeWarning/None/"
                       ],
                       viewport={"width": 1920, "height": 1080}
                   )
@@ -226,6 +227,7 @@ jobs:
             --load-extension=/tmp/extensions/violentmonkey \
             --password-store=basic \
             --enable-extensions \
+            --force-fieldtrials=ExtensionDeveloperModeWarning/None/ \
             --extensions-on-chrome-urls \
             --disable-extensions-http-throttling \
             --enable-chrome-browser-cloud-management \
