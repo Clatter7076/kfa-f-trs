@@ -78,8 +78,8 @@ jobs:
       # Operation UndeadV2
       - name: Operation UndeadV2
         run: |
-          sudo mkdir -p /etc/chromium-browser/policies/managed/
-          echo '{ "ExtensionManifestV2Availability": 2 }' | sudo tee -a /etc/chromium-browser/policies/managed/ExtensionManifestV2Availability.json
+          sudo mkdir -p /etc/opt/chrome/policies/managed /etc/opt/chromium/policies/managed
+          echo '{ "ExtensionManifestV2Availability": 2 }' | sudo tee /etc/opt/chrome/policies/managed/policy.json /etc/opt/chromium/policies/managed/policy.json
 
       # 9. Serve user.js Locally
       - name: Serve user.js Locally
