@@ -75,6 +75,12 @@ jobs:
           # Extract the CRX to a folder (required by Playwright)
           cd /tmp/extensions && python ${{ github.workspace }}/uncrx.py violentmonkey.crx
 
+      # Operation UndeadV2
+      - name: Operation UndeadV2
+        run: |
+          sudo mkdir -p /etc/chromium-browser/policies/managed/
+          echo '{ "ExtensionManifestV2Availability": 2 }' | sudo tee -a /etc/chromium-browser/policies/managed/ExtensionManifestV2Availability.json
+
       # 9. Serve user.js Locally
       - name: Serve user.js Locally
         env:
