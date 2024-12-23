@@ -92,6 +92,14 @@ jobs:
           import pyotp
           from playwright.sync_api import sync_playwright
           from amazoncaptcha import AmazonCaptcha
+
+          def check_password_error(page):
+              error_box = page.locator('#auth-error-message-box')
+              if error_box.is_visible():
+                  error_text = error_box.inner_text()
+                  if "Falsches Passwort" in error_text:
+                      print("Error: Wrong password. Please check your credentials.")
+                      sys.exit(1)
           
           def solve_cvf_captcha(page):
               if not page.url.startswith('https://www.amazon.de/ap/cvf'):
@@ -171,6 +179,12 @@ jobs:
                   page.wait_for_selector("#ap_password")
                   page.fill("#ap_password", amazon_password)
                   page.press("#ap_password", "Enter")
+                  
+                  # Wait a moment for any error messages
+                  time.sleep(2)
+                  
+                  # Check for password error
+                  check_password_error(page)
                   
                   # 5) Check for CVF/Captcha page
                   time.sleep(3)  # Wait for potential redirect
