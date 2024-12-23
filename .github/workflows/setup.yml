@@ -298,7 +298,7 @@ jobs:
                           "--no-first-run",
                           "--disable-extensions-http-throttling"
                       ],
-                      viewport={"width": 1920, "height": 1080}
+                      viewport={"width": 1920, "height": 1080},
                       timeout=120000  # Increase timeout to 120 seconds
                   )
 
