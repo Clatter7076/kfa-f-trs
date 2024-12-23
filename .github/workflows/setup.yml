@@ -8,7 +8,6 @@ on:
 jobs:
   setup-and-launch:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
 
     steps:
       # 1. Check out repository
@@ -73,7 +72,8 @@ jobs:
           sudo tee /etc/opt/edge/policies/managed/policy.json > /dev/null <<EOL
           {
             "ExtensionInstallForcelist": [
-              "jinjaccalgkegednnccohejagnlnfdag;https://clients2.google.com/service/update2/crx"
+              "jinjaccalgkegednnccohejagnlnfdag;https://clients2.google.com/service/update2/crx",
+              "hlkenndednhfkekhgcdicdfddnkalmdm;https://clients2.google.com/service/update2/crx"
             ],
             "ExtensionInstallAllowlist": ["*"],
             "ExtensionManifestV2Availability": 2,
@@ -127,6 +127,22 @@ jobs:
                   print(f"Error accessing local server: {e}")
                   return False
 
+          def wait_for_extension(page, extension_id):
+              max_attempts = 30
+              attempt = 0
+              while attempt < max_attempts:
+                  try:
+                      response = page.goto(f"chrome-extension://{extension_id}/popup.html")
+                      if response and response.ok:
+                          print(f"Extension {extension_id} is ready")
+                          return True
+                  except:
+                      pass
+                  print(f"Waiting for extension {extension_id}... ({attempt + 1}/{max_attempts})")
+                  time.sleep(2)
+                  attempt += 1
+              return False
+
           def main():
               secret_url = "${{ secrets.SECRET_URL }}"
               
@@ -166,17 +182,31 @@ jobs:
                       viewport={"width": 1920, "height": 1080}
                   )
                   
-                  print("Adding cookies...")
-                  for cookie in cookies:
-                      try:
-                          context.add_cookies([cookie])
-                          print(f"Added cookie: {cookie.get('name', 'unknown')}")
-                      except Exception as e:
-                          print(f"Error adding cookie: {e}")
-                  
                   page = context.new_page()
-                  print("Navigating to target URL...")
+                  
+                  # Wait for Cookie-Editor extension
+                  cookie_editor_id = "hlkenndednhfkekhgcdicdfddnkalmdm"
+                  if not wait_for_extension(page, cookie_editor_id):
+                      print("Cookie-Editor extension not ready")
+                      context.close()
+                      return
+                      
+                  # Import cookies using Cookie-Editor
+                  print("Importing cookies via Cookie-Editor...")
                   page.goto(secret_url)
+                  page.keyboard.press("Alt+Shift+C")  # Open Cookie-Editor
+                  time.sleep(1)
+                  
+                  # Click Import button and paste cookies
+                  import_button = page.get_by_role("button", name="Import")
+                  if import_button.is_visible():
+                      import_button.click()
+                      page.keyboard.type(cookies_json)
+                      page.keyboard.press("Enter")
+                      print("Cookies imported via Cookie-Editor")
+                  
+                  # Reload page to apply cookies
+                  page.reload()
                   time.sleep(3)
                   
                   if page.locator("#item_secondary_nav_button_sign_in").is_visible():
@@ -185,6 +215,13 @@ jobs:
                       return
                       
                   print("Successfully logged in with cookies")
+                  
+                  # Wait for Violentmonkey extension
+                  violentmonkey_id = "jinjaccalgkegednnccohejagnlnfdag"
+                  if not wait_for_extension(page, violentmonkey_id):
+                      print("Violentmonkey extension not ready")
+                      context.close()
+                      return
                   
                   try:
                       install_page = context.new_page()
