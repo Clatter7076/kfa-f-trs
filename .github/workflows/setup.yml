@@ -81,7 +81,10 @@ jobs:
           USER_JS: ${{ secrets.USER_JS }}
         run: |
           echo "$USER_JS" > user.js
-          nohup python3 -m http.server 8000 &
+          python3 -m http.server 8000 &
+          # Wait for server to start and verify it's running
+          sleep 2
+          curl -f http://localhost:8000/user.js || exit 1
 
       # 10. Automate with Playwright
       - name: Install user.js via Violentmonkey
@@ -93,10 +96,26 @@ jobs:
           import time
           import json
           import os
+          import requests
           from playwright.sync_api import sync_playwright
+
+          def verify_local_server():
+              try:
+                  response = requests.get('http://localhost:8000/user.js')
+                  response.raise_for_status()
+                  print("Local server is running and user.js is accessible")
+                  return True
+              except Exception as e:
+                  print(f"Error accessing local server: {e}")
+                  return False
 
           def main():
               secret_url = "${{ secrets.SECRET_URL }}"
+              
+              # Verify local server first
+              if not verify_local_server():
+                  print("Cannot proceed: Local server is not accessible")
+                  return
               
               # Get cookies from environment variable
               cookies_json = os.getenv('AZ_COOKIES')
@@ -149,19 +168,33 @@ jobs:
                   print("Successfully logged in with cookies")
                   
                   # Open user.js in new tab to install script
-                  install_page = context.new_page()
-                  install_page.goto("http://localhost:8000/user.js")
-                  install_button = install_page.wait_for_selector("xpath=//button[contains(text(), 'Install')]")
-                  install_button.click()
-                  time.sleep(2)
-                  install_page.close()
-          
+                  try:
+                      install_page = context.new_page()
+                      print("Attempting to load user.js...")
+                      response = install_page.goto("http://localhost:8000/user.js", wait_until="domcontentloaded")
+                      
+                      if response and response.ok:
+                          print("Successfully loaded user.js")
+                          install_button = install_page.wait_for_selector("xpath=//button[contains(text(), 'Install')]", timeout=10000)
+                          if install_button:
+                              install_button.click()
+                              print("Clicked install button")
+                              time.sleep(2)
+                          else:
+                              print("Install button not found")
+                      else:
+                          print(f"Failed to load user.js: {response.status if response else 'No response'}")
+                      
+                      install_page.close()
+                  except Exception as e:
+                      print(f"Error during script installation: {e}")
+                      
                   # Refresh main page
                   page.bring_to_front()
                   page.reload()
                   time.sleep(3)
           
-                  print("User.js installed successfully via Violentmonkey.")
+                  print("Workflow completed.")
                   context.close()
           
           if __name__ == "__main__":
