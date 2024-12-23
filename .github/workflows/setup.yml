@@ -66,7 +66,7 @@ jobs:
           x11vnc -display :99 -N -forever -shared &
           sleep 5
 
-      # 8. Configure Edge Policies
+      # 8. Configure Edge and Extensions
       - name: Configure Edge Policies
         run: |
           sudo mkdir -p /etc/opt/edge/policies/managed
@@ -94,18 +94,18 @@ jobs:
           }
           EOL
 
-      # 9. Serve user.js Locally
-      - name: Serve user.js Locally
+      # 9. Serve userscript Locally
+      - name: Serve Userscript Locally
         env:
           USER_JS: ${{ secrets.USER_JS }}
         run: |
-          echo "$USER_JS" > user.js
+          echo "$USER_JS" > main.user.js
           python3 -m http.server 8000 &
           sleep 2
-          curl -f http://localhost:8000/user.js || exit 1
+          curl -f http://localhost:8000/main.user.js || exit 1
 
       # 10. Automate with Playwright
-      - name: Install user.js via Violentmonkey
+      - name: Install userscript via Violentmonkey
         env:
           AZ_COOKIES: ${{ secrets.AZ_COOKIES }}
           DISPLAY: :99
@@ -119,9 +119,9 @@ jobs:
 
           def verify_local_server():
               try:
-                  response = requests.get('http://localhost:8000/user.js')
+                  response = requests.get('http://localhost:8000/main.user.js')
                   response.raise_for_status()
-                  print("Local server is running and user.js is accessible")
+                  print("Local server is running and main.user.js is accessible")
                   return True
               except Exception as e:
                   print(f"Error accessing local server: {e}")
@@ -141,6 +141,9 @@ jobs:
                   
               try:
                   cookies = json.loads(cookies_json)
+                  if not isinstance(cookies, list):
+                      print("Error: Cookies must be a list of cookie objects")
+                      return
               except json.JSONDecodeError as e:
                   print(f"Error parsing cookies JSON: {e}")
                   return
@@ -163,22 +166,20 @@ jobs:
                       viewport={"width": 1920, "height": 1080}
                   )
                   
+                  print("Adding cookies...")
+                  for cookie in cookies:
+                      try:
+                          context.add_cookies([cookie])
+                          print(f"Added cookie: {cookie.get('name', 'unknown')}")
+                      except Exception as e:
+                          print(f"Error adding cookie: {e}")
+                  
                   page = context.new_page()
-                  
-                  try:
-                      context.add_cookies(cookies)
-                      print("Added authentication cookies")
-                  except Exception as e:
-                      print(f"Error adding cookies: {e}")
-                      context.close()
-                      return
-                  
                   print("Navigating to target URL...")
                   page.goto(secret_url)
                   time.sleep(3)
                   
-                  sign_in_button = page.locator("#item_secondary_nav_button_sign_in")
-                  if sign_in_button.is_visible():
+                  if page.locator("#item_secondary_nav_button_sign_in").is_visible():
                       print("Error: Not logged in. Cookie authentication failed.")
                       context.close()
                       return
@@ -187,20 +188,26 @@ jobs:
                   
                   try:
                       install_page = context.new_page()
-                      print("Attempting to load user.js...")
-                      response = install_page.goto("http://localhost:8000/user.js", wait_until="domcontentloaded")
+                      print("Loading main.user.js...")
+                      response = install_page.goto("http://localhost:8000/main.user.js", wait_until="domcontentloaded")
                       
                       if response and response.ok:
-                          print("Successfully loaded user.js")
+                          print("Successfully loaded main.user.js")
                           install_button = install_page.wait_for_selector("xpath=//button[contains(text(), 'Install')]", timeout=10000)
                           if install_button:
                               install_button.click()
                               print("Clicked install button")
                               time.sleep(2)
+                              
+                              # Look for confirmation button if needed
+                              confirm_button = install_page.get_by_role("button", name="OK", exact=True)
+                              if confirm_button.is_visible():
+                                  confirm_button.click()
+                                  print("Clicked confirmation button")
                           else:
                               print("Install button not found")
                       else:
-                          print(f"Failed to load user.js: {response.status if response else 'No response'}")
+                          print(f"Failed to load main.user.js: {response.status if response else 'No response'}")
                       
                       install_page.close()
                   except Exception as e:
@@ -210,7 +217,7 @@ jobs:
                   page.reload()
                   time.sleep(3)
           
-                  print("Workflow completed.")
+                  print("Automation completed.")
                   context.close()
           
           if __name__ == "__main__":
@@ -219,18 +226,16 @@ jobs:
 
           python3 automate_browser.py
 
-      # 11. Setup Browser with Extensions and Cookies
-      - name: Setup Browsers
+      # 11. Launch Edge for VNC Access
+      - name: Launch Edge Browser
         env:
           AZ_COOKIES: ${{ secrets.AZ_COOKIES }}
           DISPLAY: :99
         run: |
-          echo "$AZ_COOKIES" > /tmp/cookies.json
-          
+          # Launch Edge
           microsoft-edge \
             --no-sandbox \
             --user-data-dir=/tmp/edge-data \
-            --password-store=basic \
             --disable-features=ExtensionsToolbarMenu \
             --disable-extensions-http-throttling \
             --disable-popup-blocking \
