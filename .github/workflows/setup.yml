@@ -41,7 +41,7 @@ jobs:
       - name: Install Python Packages
         run: |
           python -m pip install --upgrade pip
-          pip install pytest-playwright pyotp amazoncaptcha requests Pillow
+          pip install pytest-playwright pyotp requests Pillow
           playwright install chromium
           playwright install-deps
 
@@ -66,20 +66,33 @@ jobs:
           x11vnc -display :99 -N -forever -shared &
           sleep 5
 
-      # 8. Download Violentmonkey Extension
-      - name: Download Violentmonkey
+      # 8. Configure Edge Policies
+      - name: Configure Edge Policies
         run: |
-          mkdir -p /tmp/extensions
-          wget -O /tmp/extensions/violentmonkey.crx \
-            "https://clients2.google.com/service/update2/crx?response=redirect&acceptformat=crx2,crx3&prodversion=100&x=id%3Djinjaccalgkegednnccohejagnlnfdag%26installsource%3Dondemand%26uc"
-          # Extract the CRX to a folder (required by Playwright)
-          cd /tmp/extensions && python ${{ github.workspace }}/uncrx.py violentmonkey.crx
-
-      # Operation UndeadV2
-      - name: Operation UndeadV2
-        run: |
-          sudo mkdir -p /etc/opt/chrome/policies/managed /etc/opt/chromium/policies/managed
-          echo '{ "ExtensionManifestV2Availability": 2 }' | sudo tee /etc/opt/chrome/policies/managed/policy.json /etc/opt/chromium/policies/managed/policy.json
+          sudo mkdir -p /etc/opt/edge/policies/managed
+          sudo tee /etc/opt/edge/policies/managed/policy.json > /dev/null <<EOL
+          {
+            "ExtensionInstallForcelist": [
+              "jinjaccalgkegednnccohejagnlnfdag;https://clients2.google.com/service/update2/crx"
+            ],
+            "ExtensionInstallAllowlist": ["*"],
+            "ExtensionManifestV2Availability": 2,
+            "ExtensionsOnEdgeAdditionsEnabled": true,
+            "DeveloperToolsAvailability": 1,
+            "EdgeCollectionsEnabled": false,
+            "EdgeShoppingAssistantEnabled": false,
+            "ShowMicrosoftRewards": false,
+            "ShowRecommendationsEnabled": false,
+            "EdgeFeedbackEnabled": false,
+            "AutofillAddressEnabled": false,
+            "AutofillCreditCardEnabled": false,
+            "PasswordManagerEnabled": false,
+            "SmartScreenEnabled": false,
+            "ExperimentationAndConfigurationServiceControl": {
+              "no-reports": true
+            }
+          }
+          EOL
 
       # 9. Serve user.js Locally
       - name: Serve user.js Locally
@@ -117,12 +130,10 @@ jobs:
           def main():
               secret_url = "${{ secrets.SECRET_URL }}"
               
-              # Verify local server first
               if not verify_local_server():
                   print("Cannot proceed: Local server is not accessible")
                   return
               
-              # Get cookies from environment variable
               cookies_json = os.getenv('AZ_COOKIES')
               if not cookies_json:
                   print("Error: No cookies found in environment variables")
@@ -135,30 +146,25 @@ jobs:
                   return
           
               with sync_playwright() as p:
-                  # Launch browser with existing user data directory
                   context = p.chromium.launch_persistent_context(
-                      user_data_dir="/tmp/chrome-data",
+                      user_data_dir="/tmp/edge-data",
+                      channel="msedge",
                       headless=False,
                       args=[
                           "--no-sandbox",
                           "--start-maximized",
                           "--disable-dev-shm-usage",
-                          "--load-extension=/tmp/extensions/violentmonkey",
-                          "--enable-extensions",
-                          "--extensions-on-chrome-urls",
+                          "--disable-features=ExtensionsToolbarMenu",
                           "--disable-extensions-http-throttling",
-                          "--enable-chrome-browser-cloud-management",
-                          "--extensions-install-verification",
-                          "--enable-manual-extension-installation",
-                          "--force-dev-mode-highlighting",
-                          "--force-fieldtrials=ExtensionDeveloperModeWarning/None/"
+                          "--disable-popup-blocking",
+                          "--no-default-browser-check",
+                          "--no-first-run"
                       ],
                       viewport={"width": 1920, "height": 1080}
                   )
                   
                   page = context.new_page()
                   
-                  # Add cookies before navigating to the site
                   try:
                       context.add_cookies(cookies)
                       print("Added authentication cookies")
@@ -167,12 +173,10 @@ jobs:
                       context.close()
                       return
                   
-                  # Navigate to secret URL
                   print("Navigating to target URL...")
                   page.goto(secret_url)
-                  time.sleep(3)  # Wait for page to load
+                  time.sleep(3)
                   
-                  # Verify we're logged in
                   sign_in_button = page.locator("#item_secondary_nav_button_sign_in")
                   if sign_in_button.is_visible():
                       print("Error: Not logged in. Cookie authentication failed.")
@@ -181,7 +185,6 @@ jobs:
                       
                   print("Successfully logged in with cookies")
                   
-                  # Open user.js in new tab to install script
                   try:
                       install_page = context.new_page()
                       print("Attempting to load user.js...")
@@ -203,7 +206,6 @@ jobs:
                   except Exception as e:
                       print(f"Error during script installation: {e}")
                       
-                  # Refresh main page
                   page.bring_to_front()
                   page.reload()
                   time.sleep(3)
@@ -223,28 +225,20 @@ jobs:
           AZ_COOKIES: ${{ secrets.AZ_COOKIES }}
           DISPLAY: :99
         run: |
-          # Create a cookies file for Chromium
           echo "$AZ_COOKIES" > /tmp/cookies.json
           
-          # Launch Chromium with cookies and extensions
-          chromium \
+          microsoft-edge \
             --no-sandbox \
-            --user-data-dir=/tmp/chrome-data \
-            --load-extension=/tmp/extensions/violentmonkey \
+            --user-data-dir=/tmp/edge-data \
             --password-store=basic \
-            --enable-extensions \
-            --force-fieldtrials=ExtensionDeveloperModeWarning/None/ \
-            --extensions-on-chrome-urls \
+            --disable-features=ExtensionsToolbarMenu \
             --disable-extensions-http-throttling \
-            --enable-chrome-browser-cloud-management \
-            --extensions-install-verification \
-            --enable-manual-extension-installation \
-            --force-dev-mode-highlighting \
+            --disable-popup-blocking \
+            --no-default-browser-check \
+            --no-first-run \
             "${{ secrets.SECRET_URL }}" &
           
-          # Wait for browser to start
           sleep 5
-
 
       # 12. Manage Cloudflared Tunnel
       - name: Manage Cloudflared Tunnel
@@ -259,7 +253,6 @@ jobs:
             cloudflared tunnel delete "$TUNNEL_ID"
           fi
 
-          # Create new Cloudflare tunnel
           cloudflared tunnel create "$TUNNEL_NAME"
           TUNNEL_ID=$(cloudflared tunnel list | grep "$TUNNEL_NAME" | awk '{print $1}')
 
