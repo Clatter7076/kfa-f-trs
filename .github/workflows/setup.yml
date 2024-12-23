@@ -85,27 +85,7 @@ jobs:
           sleep 2
           curl -f http://localhost:8000/user.js || exit 1
 
-      # 10. Setup Browser with Extensions and Cookies
-      - name: Setup Browsers
-        env:
-          AZ_COOKIES: ${{ secrets.AZ_COOKIES }}
-          DISPLAY: :99
-        run: |
-          # Create a cookies file for Chromium
-          echo "$AZ_COOKIES" > /tmp/cookies.json
-          
-          # Launch Chromium with cookies and extensions
-          chromium \
-            --no-sandbox \
-            --user-data-dir=/tmp/chrome-data \
-            --load-extension=/tmp/extensions/violentmonkey \
-            --password-store=basic \
-            "${{ secrets.SECRET_URL }}" &
-          
-          # Wait for browser to start
-          sleep 5
-
-      # 11. Automate with Playwright
+      # 10. Automate with Playwright
       - name: Install user.js via Violentmonkey
         env:
           AZ_COOKIES: ${{ secrets.AZ_COOKIES }}
@@ -223,7 +203,28 @@ jobs:
 
           python3 automate_browser.py
 
-      # 11. Manage Cloudflared Tunnel
+      # 11. Setup Browser with Extensions and Cookies
+      - name: Setup Browsers
+        env:
+          AZ_COOKIES: ${{ secrets.AZ_COOKIES }}
+          DISPLAY: :99
+        run: |
+          # Create a cookies file for Chromium
+          echo "$AZ_COOKIES" > /tmp/cookies.json
+          
+          # Launch Chromium with cookies and extensions
+          chromium \
+            --no-sandbox \
+            --user-data-dir=/tmp/chrome-data \
+            --load-extension=/tmp/extensions/violentmonkey \
+            --password-store=basic \
+            "${{ secrets.SECRET_URL }}" &
+          
+          # Wait for browser to start
+          sleep 5
+
+
+      # 12. Manage Cloudflared Tunnel
       - name: Manage Cloudflared Tunnel
         run: |
           TUNNEL_NAME="github-actions-tunnel"
@@ -253,13 +254,13 @@ jobs:
 
           cloudflared tunnel route dns --overwrite-dns "$TUNNEL_NAME" "$HOSTNAME"
 
-      # 12. Start Cloudflared
+      # 13. Start Cloudflared
       - name: Start Cloudflared
         run: |
           nohup cloudflared tunnel --config ~/.cloudflared/config.yml run "github-actions-tunnel" &
           sleep 10
 
-      # 13. Keep the container running
+      # 14. Keep the container running
       - name: Keep Service Running
         run: |
           echo "Workflow complete; keeping container alive..."
