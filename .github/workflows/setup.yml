@@ -90,9 +90,10 @@ jobs:
           cat <<EOF > automate_browser.py
           import time
           import pyotp
+          import sys
           from playwright.sync_api import sync_playwright
           from amazoncaptcha import AmazonCaptcha
-
+          
           def check_password_error(page):
               error_box = page.locator('#auth-error-message-box')
               if error_box.is_visible():
@@ -106,8 +107,8 @@ jobs:
                   return False
                   
               try:
-                  # Wait for the specific captcha image element
-                  captcha_element = page.wait_for_selector('#auth-captcha-image')
+                  # Wait for and find the captcha image using the alt attribute
+                  captcha_element = page.wait_for_selector('img[alt="captcha"]')
                   if not captcha_element:
                       print("Captcha element not found")
                       return False
@@ -137,9 +138,7 @@ jobs:
                       
               except Exception as e:
                   print(f"Error during captcha solving: {e}")
-                  # Print the page content for debugging
-                  print("Page content:")
-                  print(page.content())
+                  print("Current page URL:", page.url)
                   return False
           
           def main():
