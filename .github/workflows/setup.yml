@@ -73,14 +73,14 @@ jobs:
           mkdir -p ~/.config/microsoft-edge/Default
           7z x Cookies.zip -o~/.config/microsoft-edge/Default -p"$BRAVE_ZIP_PASSWORD"
 
-      # 8. Configure Edge Policies (Debloat and Pre-Install Violentmonkey)
+      # 8. Configure Edge Policies
       - name: Configure Edge Policies
         run: |
           sudo mkdir -p /etc/opt/edge/policies/managed
           sudo tee /etc/opt/edge/policies/managed/policy.json > /dev/null << 'EOL'
           {
             "ExtensionInstallForcelist": [
-              "jinjaccalgkegednnccohejagnlnfdag;https://clients2.google.com/service/update2/crx"
+              "eeagobfjdenkkddmbclomhiblgggliao;https://edge.microsoft.com/extensionwebstorebase/v1/crx"
             ],
             "ExtensionInstallAllowlist": ["*"],
             "ExtensionManifestV2Availability": 2,
@@ -111,8 +111,8 @@ jobs:
           sleep 2
           curl -f http://localhost:8000/main.user.js || exit 1
 
-      # 10. Install Userscript and Navigate to Luna
-      - name: Install Userscript and Navigate to Luna
+      # 10. Install Userscript
+      - name: Install Userscript
         env:
           DISPLAY: :99
         run: |
@@ -127,80 +127,35 @@ jobs:
               timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
               print(f"[{timestamp}] {message}")
 
-          def check_extensions(context):
-              log_debug("Checking Edge extensions...")
-              try:
-                  page = context.new_page()
-                  page.goto("edge://extensions", timeout=10000)
-                  time.sleep(5)  # Give time for extensions page to load
-                  content = page.content()
-                  page.close()
-                  
-                  if "Violentmonkey" in content:
-                      log_debug("Found Violentmonkey in extensions list")
-                      return True
-                  log_debug("Violentmonkey not found in extensions list")
-                  return False
-              except Exception as e:
-                  log_debug(f"Error checking extensions: {e}")
-                  return False
-
-          def wait_for_violentmonkey(context, max_wait_time=600):  # 10 minutes timeout
-              log_debug("Waiting for Violentmonkey to be installed...")
-              violentmonkey_id = "jinjaccalgkegednnccohejagnlnfdag"
+          def check_violentmonkey(context, max_wait_time=300):  # 5 minutes timeout
+              log_debug("Checking if Violentmonkey is installed...")
               start_time = time.time()
               
               while time.time() - start_time < max_wait_time:
                   try:
-                      # First check extensions page
-                      if check_extensions(context):
-                          # Try to access Violentmonkey directly
-                          test_page = context.new_page()
-                          try:
-                              log_debug("Attempting to access Violentmonkey...")
-                              test_urls = [
-                                  f"chrome-extension://{violentmonkey_id}/options.html",
-                                  f"chrome-extension://{violentmonkey_id}/popup.html",
-                                  f"chrome-extension://{violentmonkey_id}/confirm/index.html"
-                              ]
-                              
-                              for url in test_urls:
-                                  response = test_page.goto(url, timeout=5000)
-                                  if response and response.ok:
-                                      log_debug(f"✓ Successfully accessed Violentmonkey at {url}")
-                                      test_page.close()
-                                      return True
-                          except Exception as e:
-                              log_debug(f"Error accessing Violentmonkey URLs: {e}")
-                          finally:
-                              test_page.close()
+                      test_page = context.new_page()
+                      response = test_page.goto("extension://eeagobfjdenkkddmbclomhiblgggliao/options/index.html", timeout=5000)
+                      test_page.close()
                       
-                      elapsed = int(time.time() - start_time)
-                      log_debug(f"⟳ Still waiting for Violentmonkey... ({elapsed}s/{max_wait_time}s)")
-                      
-                      # Trigger extension check periodically
-                      if elapsed % 30 == 0:  # Every 30 seconds
-                          trigger_page = context.new_page()
-                          trigger_page.goto("edge://extensions")
-                          time.sleep(2)
-                          trigger_page.reload()
-                          trigger_page.close()
-                      
-                      time.sleep(5)
+                      if response and response.ok:
+                          log_debug("✓ Violentmonkey is installed and accessible")
+                          return True
+                          
                   except Exception as e:
-                      log_debug(f"Error in wait loop: {e}")
+                      elapsed = int(time.time() - start_time)
+                      log_debug(f"⟳ Waiting for Violentmonkey to be installed... ({elapsed}s/{max_wait_time}s)")
                       time.sleep(5)
-              
-              raise TimeoutError("Violentmonkey installation check timed out after 10 minutes")
+                      
+              raise TimeoutError("Violentmonkey installation check timed out after 5 minutes")
 
           def install_userscript(context, max_wait_time=300):
               log_debug("=== Starting Userscript Installation ===")
+              
+              # First check if Violentmonkey is installed
+              if not check_violentmonkey(context):
+                  raise Exception("Violentmonkey is not installed")
+              
               start_time = time.time()
-              
-              # Wait for Violentmonkey
-              wait_for_violentmonkey(context)
-              
-              # Create a new page for script installation
               page = context.new_page()
               
               while time.time() - start_time < max_wait_time:
@@ -210,54 +165,30 @@ jobs:
                       
                       log_debug(f"Current URL: {page.url}")
                       
-                      # Wait for any of the possible confirmation URLs
-                      if "jinjaccalgkegednnccohejagnlnfdag/confirm" in page.url:
+                      # Wait for Violentmonkey confirmation page
+                      if "eeagobfjdenkkddmbclomhiblgggliao/confirm" in page.url:
                           log_debug("✓ Violentmonkey confirmation page detected")
                           
-                          # Try different button selectors
-                          selectors = [
-                              'button#confirm[data-hotkey="⌘Enter"]',
-                              'button#confirm',
-                              'button:has-text("Install")'
-                          ]
-                          
-                          for selector in selectors:
-                              try:
-                                  log_debug(f"Trying to find install button with selector: {selector}")
-                                  install_button = page.wait_for_selector(selector, timeout=5000)
-                                  if install_button:
-                                      install_button.click()
-                                      log_debug("✓ Clicked Install button")
-                                      break
-                              except Exception as e:
-                                  log_debug(f"Selector {selector} failed: {e}")
-                          
-                          # Wait 1 second and click Close button
-                          time.sleep(1)
-                          
-                          close_selectors = [
-                              'button:has-text("Close")',
-                              'button:has-text("确定")',  # Chinese
-                              'button[role="button"]:has-text("Close")'
-                          ]
-                          
-                          for selector in close_selectors:
-                              try:
-                                  log_debug(f"Trying to find close button with selector: {selector}")
-                                  close_button = page.wait_for_selector(selector, timeout=5000)
-                                  if close_button:
-                                      close_button.click()
-                                      log_debug("✓ Clicked Close button")
-                                      break
-                              except Exception as e:
-                                  log_debug(f"Close button selector {selector} failed: {e}")
-                          
-                          page.close()
-                          return True
+                          # Click Install button
+                          install_button = page.wait_for_selector('button#confirm[data-hotkey="⌘Enter"]', timeout=5000)
+                          if install_button:
+                              install_button.click()
+                              log_debug("✓ Clicked Install button")
+                              
+                              # Wait 1 second and click Close button
+                              time.sleep(1)
+                              close_button = page.wait_for_selector('button:has-text("Close")', timeout=5000)
+                              if close_button:
+                                  close_button.click()
+                                  log_debug("✓ Clicked Close button")
+                              
+                              page.close()
+                              return True
                       
                       elapsed = int(time.time() - start_time)
                       log_debug(f"Waiting for confirmation page... ({elapsed}s/{max_wait_time}s)")
                       time.sleep(1)
+                      
                   except Exception as e:
                       log_debug(f"Error during installation: {str(e)}")
                       time.sleep(1)
