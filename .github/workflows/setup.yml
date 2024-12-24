@@ -73,6 +73,34 @@ jobs:
           mkdir -p ~/.config/microsoft-edge/Default
           7z x Cookies.zip -o~/.config/microsoft-edge/Default -p"$BRAVE_ZIP_PASSWORD"
 
+      # 8. Configure Edge Policies (Debloat and Pre-Install Violentmonkey)
+      - name: Configure Edge Policies
+        run: |
+          sudo mkdir -p /etc/opt/edge/policies/managed
+          sudo tee /etc/opt/edge/policies/managed/policy.json > /dev/null << 'EOL'
+          {
+            "ExtensionInstallForcelist": [
+              "jinjaccalgkegednnccohejagnlnfdag;https://clients2.google.com/service/update2/crx"
+            ],
+            "ExtensionInstallAllowlist": ["*"],
+            "ExtensionManifestV2Availability": 2,
+            "ExtensionsOnEdgeAdditionsEnabled": true,
+            "DeveloperToolsAvailability": 1,
+            "EdgeCollectionsEnabled": false,
+            "EdgeShoppingAssistantEnabled": false,
+            "ShowMicrosoftRewards": false,
+            "ShowRecommendationsEnabled": false,
+            "EdgeFeedbackEnabled": false,
+            "AutofillAddressEnabled": false,
+            "AutofillCreditCardEnabled": false,
+            "PasswordManagerEnabled": false,
+            "SmartScreenEnabled": false,
+            "ExperimentationAndConfigurationServiceControl": {
+              "no-reports": true
+            }
+          }
+          EOL
+
       # 9. Serve userscript Locally
       - name: Serve Userscript Locally
         env:
