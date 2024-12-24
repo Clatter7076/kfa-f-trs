@@ -83,116 +83,139 @@ jobs:
           sleep 2
           curl -f http://localhost:8000/main.user.js || exit 1
 
-      # 10. Install Userscript and Navigate to Luna
-      - name: Install Userscript and Navigate to Luna
+      # 10. Install Userscript and Navigate
+      - name: Install Userscript and Navigate
         env:
           DISPLAY: :99
         run: |
-          cat <<EOF > automation.py
+          echo "[$(date -u '+%Y-%m-%d %H:%M:%S UTC')] Starting automation script creation..."
+          
+          cat <<'EOF' > automation.py
           import time
+          from datetime import datetime
           from playwright.sync_api import sync_playwright, TimeoutError
 
-          def wait_for_violentmonkey(context):
-              print("Waiting for Violentmonkey to be installed...")
+          def log_debug(message):
+              timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
+              print(f"[{timestamp}] {message}")
+
+          def wait_for_violentmonkey(context, max_wait_time=300):  # 5 minutes timeout
+              log_debug("Waiting for Violentmonkey to be installed...")
               violentmonkey_id = "jinjaccalgkegednnccohejagnlnfdag"
+              start_time = time.time()
               
-              while True:
+              while time.time() - start_time < max_wait_time:
                   try:
                       test_page = context.new_page()
-                      response = test_page.goto(f"chrome-extension://{violentmonkey_id}/options/index.html", timeout=5000)
+                      log_debug("Attempting to access Violentmonkey options page...")
+                      response = test_page.goto(f"chrome-extension://{violentmonkey_id}/options.html", timeout=5000)
                       if response and response.ok:
-                          print("✓ Violentmonkey is installed and ready")
+                          log_debug("✓ Violentmonkey is installed and ready")
                           test_page.close()
                           return True
-                  except Exception:
-                      print("⟳ Waiting for Violentmonkey to be installed...")
+                  except Exception as e:
+                      log_debug(f"⟳ Still waiting for Violentmonkey... ({int(time.time() - start_time)}s/{max_wait_time}s)")
                       time.sleep(5)
                   finally:
                       try:
                           test_page.close()
                       except:
                           pass
-
-          def install_userscript(context):
-              print("\n=== Starting Userscript Installation ===")
               
-              # Wait indefinitely for Violentmonkey
+              raise TimeoutError("Violentmonkey installation check timed out after 5 minutes")
+
+          def install_userscript(context, max_wait_time=300):  # 5 minutes timeout
+              log_debug("=== Starting Userscript Installation ===")
+              start_time = time.time()
+              
+              # Wait for Violentmonkey
               wait_for_violentmonkey(context)
               
               # Create a new page for script installation
               page = context.new_page()
               
-              while True:
+              while time.time() - start_time < max_wait_time:
                   try:
-                      # Visit the userscript URL
-                      print("Loading main.user.js...")
-                      page.goto("http://localhost:8000/main.user.js")
+                      log_debug("Loading main.user.js...")
+                      page.goto("http://localhost:8000/main.user.js", timeout=10000)
                       
-                      # Wait for the Violentmonkey confirmation page
-                      print("Waiting for Violentmonkey confirmation page...")
+                      log_debug(f"Current URL: {page.url}")
                       if page.url.startswith("chrome-extension://jinjaccalgkegednnccohejagnlnfdag/confirm/"):
-                          print("✓ Violentmonkey confirmation page detected")
+                          log_debug("✓ Violentmonkey confirmation page detected")
                           
-                          # Click the Install button
-                          install_button = page.locator('button#confirm[data-hotkey="Enter"]')
-                          install_button.click()
-                          print("✓ Clicked Install button")
+                          # Click the Install button with 10s timeout
+                          log_debug("Looking for Install button...")
+                          install_button = page.wait_for_selector('button#confirm[data-hotkey="⌘Enter"]', timeout=10000)
+                          if install_button:
+                              install_button.click()
+                              log_debug("✓ Clicked Install button")
                           
-                          # Wait 1 second and click Close button
-                          time.sleep(1)
-                          close_button = page.get_by_role("button", name="Close")
-                          close_button.click()
-                          print("✓ Clicked Close button")
-                          
-                          page.close()
-                          return True
-                          
+                              # Wait 1 second and click Close button
+                              time.sleep(1)
+                              log_debug("Looking for Close button...")
+                              close_button = page.wait_for_selector('button:has-text("Close")', timeout=10000)
+                              if close_button:
+                                  close_button.click()
+                                  log_debug("✓ Clicked Close button")
+                              
+                              page.close()
+                              return True
+                      
                       time.sleep(1)
+                      log_debug(f"Waiting for confirmation page... ({int(time.time() - start_time)}s/{max_wait_time}s)")
                   except Exception as e:
-                      print(f"Retrying due to error: {str(e)}")
+                      log_debug(f"Error during installation: {str(e)}")
                       time.sleep(1)
+              
+              raise TimeoutError("Userscript installation timed out after 5 minutes")
 
           def main():
+              log_debug("Starting main automation process")
+              
               with sync_playwright() as p:
-                  # Launch browser with persistent context
-                  context = p.chromium.launch_persistent_context(
-                      user_data_dir="/tmp/edge-data",
-                      channel="msedge",
-                      headless=False,
-                      args=[
-                          "--no-sandbox",
-                          "--disable-dev-shm-usage",
-                          "--start-maximized",
-                          "--disable-features=ExtensionsToolbarMenu",
-                          "--no-default-browser-check",
-                          "--no-first-run",
-                          "--disable-extensions-http-throttling"
-                      ],
-                      viewport={"width": 1920, "height": 1080}
-                  )
-
+                  log_debug("Launching browser...")
                   try:
+                      context = p.chromium.launch_persistent_context(
+                          user_data_dir="/tmp/edge-data",
+                          channel="msedge",
+                          headless=False,
+                          args=[
+                              "--no-sandbox",
+                              "--disable-dev-shm-usage",
+                              "--start-maximized",
+                              "--disable-features=ExtensionsToolbarMenu",
+                              "--no-default-browser-check",
+                              "--no-first-run",
+                              "--disable-extensions-http-throttling"
+                          ],
+                          viewport={"width": 1920, "height": 1080},
+                          timeout=30000  # 30 seconds timeout for browser launch
+                      )
+                      log_debug("Browser launched successfully")
+
                       # Install the userscript
                       if install_userscript(context):
-                          print("\n✓ Userscript installation successful")
+                          log_debug("✓ Userscript installation successful")
                           
                           # Navigate to Luna
-                          print("\nNavigating to Luna...")
+                          log_debug("Navigating to Luna...")
                           page = context.new_page()
-                          page.goto("https://luna.amazon.de")
-                          print("✓ Navigation complete - userscript will handle the rest")
+                          page.goto("https://luna.amazon.de", timeout=30000)
+                          log_debug("✓ Navigation complete - userscript will handle the rest")
                       
                   except Exception as e:
-                      print(f"\n✗ Automation failed: {e}")
+                      log_debug(f"✗ Automation failed: {e}")
                       raise
                   finally:
-                      # Keep the context open for the userscript to work
+                      log_debug("Automation script completed")
                       pass
 
           if __name__ == "__main__":
+              log_debug("Script started")
               main()
           EOF
 
+          echo "[$(date -u '+%Y-%m-%d %H:%M:%S UTC')] Automation script created, starting Python execution..."
           python3 automation.py
 
       # 11. Launch Edge for VNC Access
