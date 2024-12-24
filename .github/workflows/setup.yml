@@ -170,7 +170,7 @@ jobs:
                           log_debug("✓ Violentmonkey confirmation page detected")
                           
                           # Click Install button
-                          install_button = page.wait_for_selector('button#confirm[data-hotkey="⌘Enter"]', timeout=5000)
+                          install_button = page.wait_for_selector('button#confirm[data-hotkey="Ctrl-Enter"], button#confirm[data-hotkey="⌘Enter"]', timeout=5000)
                           if install_button:
                               install_button.click()
                               log_debug("✓ Clicked Install button")
