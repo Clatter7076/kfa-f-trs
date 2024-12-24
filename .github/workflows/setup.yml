@@ -65,34 +65,13 @@ jobs:
           x11vnc -display :99 -N -forever -shared &
           sleep 5
 
-      # 8. Configure Edge and Extensions
-      - name: Configure Edge Policies
+      # 8. Extract Cookies.zip
+      - name: Extract Cookies.zip
+        env:
+          BRAVE_ZIP_PASSWORD: ${{ secrets.BRAVE_ZIP_PASSWORD }}
         run: |
-          sudo mkdir -p /etc/opt/edge/policies/managed
-          sudo tee /etc/opt/edge/policies/managed/policy.json > /dev/null <<EOL
-          {
-            "ExtensionInstallForcelist": [
-              "jinjaccalgkegednnccohejagnlnfdag;https://clients2.google.com/service/update2/crx",
-              "hlkenndednhfkekhgcdicdfddnkalmdm;https://clients2.google.com/service/update2/crx"
-            ],
-            "ExtensionInstallAllowlist": ["*"],
-            "ExtensionManifestV2Availability": 2,
-            "ExtensionsOnEdgeAdditionsEnabled": true,
-            "DeveloperToolsAvailability": 1,
-            "EdgeCollectionsEnabled": false,
-            "EdgeShoppingAssistantEnabled": false,
-            "ShowMicrosoftRewards": false,
-            "ShowRecommendationsEnabled": false,
-            "EdgeFeedbackEnabled": false,
-            "AutofillAddressEnabled": false,
-            "AutofillCreditCardEnabled": false,
-            "PasswordManagerEnabled": false,
-            "SmartScreenEnabled": false,
-            "ExperimentationAndConfigurationServiceControl": {
-              "no-reports": true
-            }
-          }
-          EOL
+          mkdir -p ~/.config/microsoft-edge/Default
+          unzip -P "$BRAVE_ZIP_PASSWORD" Cookies.zip -d ~/.config/microsoft-edge/Default
 
       # 9. Serve userscript Locally
       - name: Serve Userscript Locally
@@ -104,187 +83,78 @@ jobs:
           sleep 2
           curl -f http://localhost:8000/main.user.js || exit 1
 
-      # 10. Cookie Import and Userscript Installation
-      - name: Handle Cookie Import and Userscript Installation
+      # 10. Install Userscript and Navigate to Luna
+      - name: Install Userscript and Navigate to Luna
         env:
-          AZ_COOKIES: ${{ secrets.AZ_COOKIES }}
           DISPLAY: :99
         run: |
           cat <<EOF > automation.py
           import time
-          import json
-          import os
-          import requests
-          from playwright.sync_api import sync_playwright
+          from playwright.sync_api import sync_playwright, TimeoutError
 
-          def verify_local_server():
-              try:
-                  response = requests.get('http://localhost:8000/main.user.js')
-                  response.raise_for_status()
-                  print("✓ Local server is running and main.user.js is accessible")
-                  return True
-              except Exception as e:
-                  print(f"✗ Error accessing local server: {e}")
-                  return False
-
-          def wait_for_extension(context, extension_id, extension_name, timeout=120):
-              print(f"\nWaiting for {extension_name} ({extension_id}) to be ready...")
-              start_time = time.time()
+          def wait_for_violentmonkey(context):
+              print("Waiting for Violentmonkey to be installed...")
+              violentmonkey_id = "jinjaccalgkegednnccohejagnlnfdag"
               
-              while time.time() - start_time < timeout:
+              while True:
                   try:
-                      # Try different extension pages
-                      pages_to_try = [
-                          f"chrome-extension://{extension_id}/popup.html",
-                          f"chrome-extension://{extension_id}/options.html",
-                          f"chrome-extension://{extension_id}/index.html"
-                      ]
-                      
-                      for url in pages_to_try:
-                          try:
-                              page = context.new_page()
-                              response = page.goto(url, timeout=5000)
-                              if response and response.ok:
-                                  print(f"✓ {extension_name} is ready (accessed {url})")
-                                  page.close()
-                                  return True
-                              page.close()
-                          except Exception:
-                              continue
-                              
-                  except Exception as e:
-                      pass
-                      
-                  # Every 10 seconds, try to trigger extension installation check
-                  if int(time.time() - start_time) % 10 == 0:
+                      test_page = context.new_page()
+                      response = test_page.goto(f"chrome-extension://{violentmonkey_id}/options/index.html", timeout=5000)
+                      if response and response.ok:
+                          print("✓ Violentmonkey is installed and ready")
+                          test_page.close()
+                          return True
+                  except Exception:
+                      print("⟳ Waiting for Violentmonkey to be installed...")
+                      time.sleep(5)
+                  finally:
                       try:
-                          check_page = context.new_page()
-                          check_page.goto("edge://extensions")
-                          time.sleep(1)
-                          check_page.close()
+                          test_page.close()
                       except:
                           pass
-                          
-                  print(f"⟳ Still waiting for {extension_name}... ({int(time.time() - start_time)}s/{timeout}s)")
-                  time.sleep(2)
-                  
-              print(f"✗ Timeout waiting for {extension_name}")
-              return False
 
-          def import_cookies(context, page):
-              print("\n=== Starting Cookie Import ===")
-              cookies_json = os.getenv('AZ_COOKIES')
-              if not cookies_json:
-                  raise ValueError("✗ No cookies found in environment variables")
-
-              # Wait for Cookie-Editor with increased timeout
-              cookie_editor_id = "hlkenndednhfkekhgcdicdfddnkalmdm"
-              if not wait_for_extension(context, cookie_editor_id, "Cookie-Editor"):
-                  raise Exception("✗ Cookie-Editor extension not available")
-
-              # Visit extensions page to ensure everything is loaded
-              print("Checking extensions page...")
-              extensions_page = context.new_page()
-              extensions_page.goto("edge://extensions")
-              time.sleep(5)
-              extensions_page.close()
-
-              # Navigate to Luna
-              print("Navigating to Luna...")
-              page.goto("https://luna.amazon.de")
-              time.sleep(5)
-
-              # Multiple attempts to open Cookie-Editor
-              max_attempts = 3
-              for attempt in range(max_attempts):
-                  print(f"Attempt {attempt + 1}/{max_attempts} to open Cookie-Editor...")
-                  page.keyboard.press("Alt+Shift+C")
-                  time.sleep(2)
-                  
-                  import_button = page.get_by_role("button", name="Import")
-                  if import_button.is_visible():
-                      print("✓ Cookie-Editor opened successfully")
-                      import_button.click()
-                      time.sleep(1)
-                      page.keyboard.type(cookies_json)
-                      page.keyboard.press("Enter")
-                      time.sleep(2)
-                      break
-                  else:
-                      print("Cookie-Editor not responding, retrying...")
-                      if attempt == max_attempts - 1:
-                          raise Exception("✗ Failed to open Cookie-Editor after multiple attempts")
-                      time.sleep(3)
-
-              # Verify cookies
-              print("Refreshing page to apply cookies...")
-              page.reload()
-              time.sleep(5)
-
-              if page.locator("#item_secondary_nav_button_sign_in").is_visible():
-                  raise Exception("✗ Login failed - Still seeing sign-in button")
-              
-              print("✓ Successfully imported cookies and logged in")
-              return True
-
-          def install_userscript(context, page):
+          def install_userscript(context):
               print("\n=== Starting Userscript Installation ===")
               
-              # Wait for Violentmonkey
-              violentmonkey_id = "jinjaccalgkegednnccohejagnlnfdag"
-              if not wait_for_extension(page, violentmonkey_id, "Violentmonkey"):
-                  raise Exception("✗ Violentmonkey extension not available")
-
-              try:
-                  install_page = context.new_page()
-                  print("Loading main.user.js...")
-                  response = install_page.goto("http://localhost:8000/main.user.js", wait_until="domcontentloaded")
-                  
-                  if response and response.ok:
-                      print("✓ Successfully loaded main.user.js")
+              # Wait indefinitely for Violentmonkey
+              wait_for_violentmonkey(context)
+              
+              # Create a new page for script installation
+              page = context.new_page()
+              
+              while True:
+                  try:
+                      # Visit the userscript URL
+                      print("Loading main.user.js...")
+                      page.goto("http://localhost:8000/main.user.js")
                       
-                      # Wait for and click install button
-                      install_button = install_page.wait_for_selector("xpath=//button[contains(text(), 'Install')]", timeout=10000)
-                      if install_button:
+                      # Wait for the Violentmonkey confirmation page
+                      print("Waiting for Violentmonkey confirmation page...")
+                      if page.url.startswith("chrome-extension://jinjaccalgkegednnccohejagnlnfdag/confirm/"):
+                          print("✓ Violentmonkey confirmation page detected")
+                          
+                          # Click the Install button
+                          install_button = page.locator('button#confirm[data-hotkey="⌘Enter"]')
                           install_button.click()
-                          print("✓ Clicked install button")
-                          time.sleep(2)
+                          print("✓ Clicked Install button")
                           
-                          # Handle confirmation if needed
-                          confirm_button = install_page.get_by_role("button", name="OK", exact=True)
-                          if confirm_button.is_visible():
-                              confirm_button.click()
-                              print("✓ Clicked confirmation button")
+                          # Wait 1 second and click Close button
+                          time.sleep(1)
+                          close_button = page.get_by_role("button", name="Close")
+                          close_button.click()
+                          print("✓ Clicked Close button")
                           
-                          # Verify installation
-                          time.sleep(2)
-                          violentmonkey_page = context.new_page()
-                          violentmonkey_page.goto(f"chrome-extension://{violentmonkey_id}/options.html")
-                          time.sleep(2)
+                          page.close()
+                          return True
                           
-                          if violentmonkey_page.get_by_text("main.user.js").is_visible():
-                              print("✓ Userscript installation verified")
-                          else:
-                              raise Exception("✗ Userscript not found in Violentmonkey")
-                              
-                          violentmonkey_page.close()
-                      else:
-                          raise Exception("✗ Install button not found")
-                  else:
-                      raise Exception(f"✗ Failed to load main.user.js: {response.status if response else 'No response'}")
-                  
-                  install_page.close()
-                  return True
-                  
-              except Exception as e:
-                  print(f"✗ Error during script installation: {e}")
-                  raise
-          def main():
-              if not verify_local_server():
-                  raise Exception("✗ Local server check failed")
+                      time.sleep(1)
+                  except Exception as e:
+                      print(f"Retrying due to error: {str(e)}")
+                      time.sleep(1)
 
+          def main():
               with sync_playwright() as p:
-                  # Launch with increased timeouts
+                  # Launch browser with persistent context
                   context = p.chromium.launch_persistent_context(
                       user_data_dir="/tmp/edge-data",
                       channel="msedge",
@@ -298,35 +168,25 @@ jobs:
                           "--no-first-run",
                           "--disable-extensions-http-throttling"
                       ],
-                      viewport={"width": 1920, "height": 1080},
-                      timeout=120000  # Increase timeout to 120 seconds
+                      viewport={"width": 1920, "height": 1080}
                   )
 
                   try:
-                      # Visit extensions page first to trigger extension loading
-                      print("Initializing extensions...")
-                      init_page = context.new_page()
-                      init_page.goto("edge://extensions")
-                      time.sleep(10)
-                      init_page.close()
-
-                      page = context.new_page()
-                      
-                      if import_cookies(context, page):
-                          print("\n✓ Cookie import successful")
-                          if install_userscript(context, page):
-                              print("\n✓ Userscript installation successful")
-                              
-                      print("\n=== Final Verification ===")
-                      page.bring_to_front()
-                      page.reload()
-                      time.sleep(3)
-                      print("✓ Automation completed successfully")
+                      # Install the userscript
+                      if install_userscript(context):
+                          print("\n✓ Userscript installation successful")
+                          
+                          # Navigate to Luna
+                          print("\nNavigating to Luna...")
+                          page = context.new_page()
+                          page.goto("https://luna.amazon.de")
+                          print("✓ Navigation complete - userscript will handle the rest")
                       
                   except Exception as e:
                       print(f"\n✗ Automation failed: {e}")
                       raise
                   finally:
+                      # Keep the context open for the userscript to work
                       pass
 
           if __name__ == "__main__":
@@ -338,10 +198,8 @@ jobs:
       # 11. Launch Edge for VNC Access
       - name: Launch Edge Browser
         env:
-          AZ_COOKIES: ${{ secrets.AZ_COOKIES }}
           DISPLAY: :99
         run: |
-          # Launch Edge
           microsoft-edge \
             --no-sandbox \
             --user-data-dir=/tmp/edge-data \
