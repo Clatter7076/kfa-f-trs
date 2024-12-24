@@ -134,7 +134,7 @@ jobs:
                           print("✓ Violentmonkey confirmation page detected")
                           
                           # Click the Install button
-                          install_button = page.locator('button#confirm[data-hotkey="⌘Enter"]')
+                          install_button = page.locator('button#confirm[data-hotkey="Enter"]')
                           install_button.click()
                           print("✓ Clicked Install button")
                           
