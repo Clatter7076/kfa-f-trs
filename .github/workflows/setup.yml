@@ -71,7 +71,7 @@ jobs:
           BRAVE_ZIP_PASSWORD: ${{ secrets.BRAVE_ZIP_PASSWORD }}
         run: |
           mkdir -p ~/.config/microsoft-edge/Default
-          unzip -P "$BRAVE_ZIP_PASSWORD" Cookies.zip -d ~/.config/microsoft-edge/Default
+          7z x Cookies.zip -o~/.config/microsoft-edge/Default -p"$BRAVE_ZIP_PASSWORD"
 
       # 9. Serve userscript Locally
       - name: Serve Userscript Locally
