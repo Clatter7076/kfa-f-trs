@@ -14,13 +14,7 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # 2. Set up Python
-      - name: Setup Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.10'
-
-      # 3. Install System Dependencies
+      # 2. Install System Dependencies
       - name: Install Dependencies
         run: |
           sudo apt-get update
@@ -36,28 +30,20 @@ jobs:
             libgbm-dev \
             libasound2
 
-      # 4. Install Python Packages and Playwright
-      - name: Install Python Packages
-        run: |
-          python -m pip install --upgrade pip
-          pip install pytest-playwright pyotp requests Pillow
-          playwright install chromium
-          playwright install-deps
-
-      # 5. Install Cloudflared
+      # 3. Install Cloudflared
       - name: Install Cloudflared
         run: |
           wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
           sudo dpkg -i cloudflared-linux-amd64.deb
 
-      # 6. Set up Cloudflare credentials
+      # 4. Set up Cloudflare credentials
       - name: Setup Cloudflare Credentials
         run: |
           mkdir -p ~/.cloudflared
           echo "${{ secrets.CLOUDFLARE_CERT_PEM }}" > ~/.cloudflared/cert.pem
           chmod 600 ~/.cloudflared/cert.pem
 
-      # 7. Start Xvfb and x11vnc
+      # 5. Start Xvfb and x11vnc
       - name: Start Virtual Display and VNC
         run: |
           export DISPLAY=:99
@@ -65,191 +51,72 @@ jobs:
           x11vnc -display :99 -N -forever -shared &
           sleep 5
 
-      # 8. Extract Cookies.zip
-      - name: Extract Cookies.zip
+      # 6. Extract Edge Profile
+      - name: Extract Edge Profile
         env:
           BRAVE_ZIP_PASSWORD: ${{ secrets.BRAVE_ZIP_PASSWORD }}
         run: |
-          mkdir -p ~/.config/microsoft-edge/Default
-          7z x Cookies.zip -o~/.config/microsoft-edge/Default -p"$BRAVE_ZIP_PASSWORD"
+          rm -rf ~/.config/microsoft-edge
+          mkdir -p ~/.config/microsoft-edge
+          7z x edge_data.zip -o~/.config/microsoft-edge -p"$BRAVE_ZIP_PASSWORD"
 
-      # 9. Serve Userscript Locally
-      - name: Serve Userscript Locally
-        env:
-          USER_JS: ${{ secrets.USER_JS }}
+      # 7. Configure Edge Policies
+      - name: Configure Edge Policies
         run: |
-          echo "$USER_JS" > main.user.js
-          python3 -m http.server 8000 &
-          sleep 2
-          curl -f http://localhost:8000/main.user.js || exit 1
+          sudo mkdir -p /etc/opt/edge/policies/managed
+          sudo tee /etc/opt/edge/policies/managed/policy.json > /dev/null << 'EOL'
+          {
+            "EdgeCollectionsEnabled": false,
+            "EdgeShoppingAssistantEnabled": false,
+            "ShowMicrosoftRewards": false,
+            "ShowRecommendationsEnabled": false,
+            "EdgeFeedbackEnabled": false,
+            "AutofillAddressEnabled": false,
+            "AutofillCreditCardEnabled": false,
+            "PasswordManagerEnabled": false,
+            "SmartScreenEnabled": false,
+            "ExperimentationAndConfigurationServiceControl": {
+              "no-reports": true
+            },
+            "BackgroundModeEnabled": false,
+            "MetricsReportingEnabled": false,
+            "SearchSuggestEnabled": false,
+            "AlternateErrorPagesEnabled": false,
+            "BuiltInDnsClientEnabled": false,
+            "EdgeEnhanceImagesEnabled": false,
+            "EdgePdfOcrEnabled": false,
+            "NetworkPredictionOptions": 2,
+            "PaymentMethodQueryEnabled": false,
+            "SpellcheckEnabled": false,
+            "SyncDisabled": true,
+            "TranslateEnabled": false
+          }
+          EOL
 
-      # 10. Install Userscript
-      - name: Install Userscript
-        env:
-          DISPLAY: :99
-        run: |
-          echo "[$(date -u '+%Y-%m-%d %H:%M:%S UTC')] Starting automation script creation..."
-          
-          cat <<'EOF' > automation.py
-          import time
-          from datetime import datetime
-          from playwright.sync_api import sync_playwright, TimeoutError
-          import requests
-          import os
-
-          def log_debug(message):
-              timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
-              print(f"[{timestamp}] {message}")
-
-          def download_extension(ext_id, output_dir):
-              url = f"https://edge.microsoft.com/extensionwebstorebase/v1/crx?response=redirect&prodversion=91.0.864.48&x=id%3D{ext_id}%26installsource%3Dondemand%26uc"
-              response = requests.get(url)
-              ext_path = os.path.join(output_dir, f"{ext_id}.crx")
-              with open(ext_path, 'wb') as file:
-                  file.write(response.content)
-              log_debug(f"✓ Downloaded extension to {ext_path}")
-              return ext_path
-
-          def check_violentmonkey(context, max_wait_time=300):  # 5 minutes timeout
-              log_debug("Checking if Violentmonkey is installed...")
-              start_time = time.time()
-              
-              while time.time() - start_time < max_wait_time:
-                  try:
-                      test_page = context.new_page()
-                      response = test_page.goto("extension://eeagobfjdenkkddmbclomhiblgggliao/options/index.html", timeout=5000)
-                      test_page.close()
-                      
-                      if response and response.ok:
-                          log_debug("✓ Violentmonkey is installed and accessible")
-                          return True
-                          
-                  except Exception as e:
-                      elapsed = int(time.time() - start_time)
-                      log_debug(f"⟳ Waiting for Violentmonkey to be installed... ({elapsed}s/{max_wait_time}s)")
-                      time.sleep(5)
-                      
-              raise TimeoutError("Violentmonkey installation check timed out after 5 minutes")
-
-          def install_userscript(context, max_wait_time=300):
-              log_debug("=== Starting Userscript Installation ===")
-              
-              # First check if Violentmonkey is installed
-              if not check_violentmonkey(context):
-                  raise Exception("Violentmonkey is not installed")
-              
-              start_time = time.time()
-              page = context.new_page()
-              
-              while time.time() - start_time < max_wait_time:
-                  try:
-                      log_debug("Loading main.user.js...")
-                      page.goto("http://localhost:8000/main.user.js", timeout=10000)
-                      
-                      log_debug(f"Current URL: {page.url}")
-                      
-                      # Wait for Violentmonkey confirmation page
-                      if "eeagobfjdenkkddmbclomhiblgggliao/confirm" in page.url:
-                          log_debug("✓ Violentmonkey confirmation page detected")
-                          
-                          # Click Install button
-                          install_button = page.wait_for_selector('button#confirm[data-hotkey="Ctrl-Enter"], button#confirm[data-hotkey="⌘Enter"]', timeout=5000)
-                          if install_button:
-                              install_button.click()
-                              log_debug("✓ Clicked Install button")
-                              
-                              # Wait 1 second and click Close button
-                              time.sleep(1)
-                              close_button = page.wait_for_selector('button:has-text("Close")', timeout=5000)
-                              if close_button:
-                                  close_button.click()
-                                  log_debug("✓ Clicked Close button")
-                              
-                              page.close()
-                              return True
-                      
-                      elapsed = int(time.time() - start_time)
-                      log_debug(f"Waiting for confirmation page... ({elapsed}s/{max_wait_time}s)")
-                      time.sleep(1)
-                      
-                  except Exception as e:
-                      log_debug(f"Error during installation: {str(e)}")
-                      time.sleep(1)
-              
-              raise TimeoutError("Userscript installation timed out after 5 minutes")
-
-          def main():
-              log_debug("Starting main automation process")
-              
-              with sync_playwright() as p:
-                  log_debug("Launching browser...")
-                  try:
-                      ext_dir = "/tmp/msedge-extensions"
-                      os.makedirs(ext_dir, exist_ok=True)
-                      violentmonkey_id = "eeagobfjdenkkddmbclomhiblgggliao"
-                      download_extension(violentmonkey_id, ext_dir)
-
-                      context = p.chromium.launch_persistent_context(
-                          user_data_dir=os.path.expanduser("~/.config/microsoft-edge"),
-                          channel="msedge",
-                          headless=False,
-                          args=[
-                              f"--disable-extensions-except={ext_dir}/{violentmonkey_id}.crx",
-                              f"--load-extension={ext_dir}/{violentmonkey_id}.crx",
-                              "--no-sandbox",
-                              "--disable-dev-shm-usage",
-                              "--start-maximized",
-                              "--disable-features=ExtensionsToolbarMenu",
-                              "--no-default-browser-check",
-                              "--no-first-run",
-                              "--disable-extensions-http-throttling"
-                          ],
-                          viewport={"width": 1920, "height": 1080},
-                          timeout=60000  # Increase timeout to 60 seconds
-                      )
-                      log_debug("Browser launched successfully")
-
-                      if install_userscript(context):
-                          log_debug("✓ Userscript installation successful")
-                          
-                          log_debug("Navigating to Luna...")
-                          page = context.new_page()
-                          page.goto("https://luna.amazon.de", timeout=30000)
-                          log_debug("✓ Navigation complete - userscript will handle the rest")
-                      
-                  except Exception as e:
-                      log_debug(f"✗ Automation failed: {e}")
-                      raise
-                  finally:
-                      log_debug("Automation script completed")
-                      pass
-
-          if __name__ == "__main__":
-              log_debug("Script started")
-              main()
-          EOF
-
-          echo "[$(date -u '+%Y-%m-%d %H:%M:%S UTC')] Automation script created, starting Python execution..."
-          python3 automation.py
-
-      # 11. Launch Edge for VNC Access
+      # 8. Launch Edge Browser
       - name: Launch Edge Browser
         env:
           DISPLAY: :99
         run: |
           microsoft-edge \
             --no-sandbox \
-            --user-data-dir=~/.config/microsoft-edge \
             --disable-features=ExtensionsToolbarMenu \
             --disable-extensions-http-throttling \
             --disable-popup-blocking \
             --no-default-browser-check \
             --no-first-run \
+            --disable-background-mode \
+            --disable-component-update \
+            --disable-sync \
+            --disable-metrics \
+            --disable-breakpad \
+            --disable-crash-reporter \
+            --disable-domain-reliability \
             "${{ secrets.SECRET_URL }}" &
           
           sleep 5
 
-      # 12. Manage Cloudflared Tunnel
+      # 9. Manage Cloudflared Tunnel
       - name: Manage Cloudflared Tunnel
         run: |
           TUNNEL_NAME="github-actions-tunnel"
@@ -278,13 +145,13 @@ jobs:
 
           cloudflared tunnel route dns --overwrite-dns "$TUNNEL_NAME" "$HOSTNAME"
 
-      # 13. Start Cloudflared
+      # 10. Start Cloudflared
       - name: Start Cloudflared
         run: |
           nohup cloudflared tunnel --config ~/.cloudflared/config.yml run "github-actions-tunnel" &
           sleep 10
 
-      # 14. Keep the container running
+      # 11. Keep the container running
       - name: Keep Service Running
         run: |
           echo "Workflow complete; keeping container alive..."
