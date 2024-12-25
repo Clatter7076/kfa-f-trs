@@ -117,7 +117,7 @@ jobs:
               while time.time() - start_time < max_wait_time:
                   try:
                       test_page = context.new_page()
-                      response = test_page.goto("chrome-extension://eeagobfjdenkkddmbclomhiblgggliao/options/index.html", timeout=5000)
+                      response = test_page.goto("extension://eeagobfjdenkkddmbclomhiblgggliao/options/index.html", timeout=5000)
                       test_page.close()
                       
                       if response and response.ok:
@@ -190,7 +190,7 @@ jobs:
                       download_extension(violentmonkey_id, ext_dir)
 
                       context = p.chromium.launch_persistent_context(
-                          user_data_dir="~/.config/microsoft-edge",
+                          user_data_dir=os.path.expanduser("~/.config/microsoft-edge"),
                           channel="msedge",
                           headless=False,
                           args=[
@@ -205,7 +205,7 @@ jobs:
                               "--disable-extensions-http-throttling"
                           ],
                           viewport={"width": 1920, "height": 1080},
-                          timeout=30000
+                          timeout=60000  # Increase timeout to 60 seconds
                       )
                       log_debug("Browser launched successfully")
 
