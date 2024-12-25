@@ -73,35 +73,7 @@ jobs:
           mkdir -p ~/.config/microsoft-edge/Default
           7z x Cookies.zip -o~/.config/microsoft-edge/Default -p"$BRAVE_ZIP_PASSWORD"
 
-      # 8. Configure Edge Policies
-      - name: Configure Edge Policies
-        run: |
-          sudo mkdir -p /etc/opt/edge/policies/managed
-          sudo tee /etc/opt/edge/policies/managed/policy.json > /dev/null << 'EOL'
-          {
-            "ExtensionInstallForcelist": [
-              "eeagobfjdenkkddmbclomhiblgggliao;https://edge.microsoft.com/extensionwebstorebase/v1/crx"
-            ],
-            "ExtensionInstallAllowlist": ["*"],
-            "ExtensionManifestV2Availability": 2,
-            "ExtensionsOnEdgeAdditionsEnabled": true,
-            "DeveloperToolsAvailability": 1,
-            "EdgeCollectionsEnabled": false,
-            "EdgeShoppingAssistantEnabled": false,
-            "ShowMicrosoftRewards": false,
-            "ShowRecommendationsEnabled": false,
-            "EdgeFeedbackEnabled": false,
-            "AutofillAddressEnabled": false,
-            "AutofillCreditCardEnabled": false,
-            "PasswordManagerEnabled": false,
-            "SmartScreenEnabled": false,
-            "ExperimentationAndConfigurationServiceControl": {
-              "no-reports": true
-            }
-          }
-          EOL
-
-      # 9. Serve userscript Locally
+      # 9. Serve Userscript Locally
       - name: Serve Userscript Locally
         env:
           USER_JS: ${{ secrets.USER_JS }}
@@ -122,10 +94,21 @@ jobs:
           import time
           from datetime import datetime
           from playwright.sync_api import sync_playwright, TimeoutError
+          import requests
+          import os
 
           def log_debug(message):
               timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
               print(f"[{timestamp}] {message}")
+
+          def download_extension(ext_id, output_dir):
+              url = f"https://edge.microsoft.com/extensionwebstorebase/v1/crx?response=redirect&prodversion=91.0.864.48&x=id%3D{ext_id}%26installsource%3Dondemand%26uc"
+              response = requests.get(url)
+              ext_path = os.path.join(output_dir, f"{ext_id}.crx")
+              with open(ext_path, 'wb') as file:
+                  file.write(response.content)
+              log_debug(f"✓ Downloaded extension to {ext_path}")
+              return ext_path
 
           def check_violentmonkey(context, max_wait_time=300):  # 5 minutes timeout
               log_debug("Checking if Violentmonkey is installed...")
@@ -134,7 +117,7 @@ jobs:
               while time.time() - start_time < max_wait_time:
                   try:
                       test_page = context.new_page()
-                      response = test_page.goto("extension://eeagobfjdenkkddmbclomhiblgggliao/options/index.html", timeout=5000)
+                      response = test_page.goto("chrome-extension://eeagobfjdenkkddmbclomhiblgggliao/options/index.html", timeout=5000)
                       test_page.close()
                       
                       if response and response.ok:
@@ -201,11 +184,18 @@ jobs:
               with sync_playwright() as p:
                   log_debug("Launching browser...")
                   try:
+                      ext_dir = "/tmp/msedge-extensions"
+                      os.makedirs(ext_dir, exist_ok=True)
+                      violentmonkey_id = "eeagobfjdenkkddmbclomhiblgggliao"
+                      download_extension(violentmonkey_id, ext_dir)
+
                       context = p.chromium.launch_persistent_context(
-                          user_data_dir="/tmp/edge-data",
+                          user_data_dir="~/.config/microsoft-edge",
                           channel="msedge",
                           headless=False,
                           args=[
+                              f"--disable-extensions-except={ext_dir}/{violentmonkey_id}.crx",
+                              f"--load-extension={ext_dir}/{violentmonkey_id}.crx",
                               "--no-sandbox",
                               "--disable-dev-shm-usage",
                               "--start-maximized",
@@ -249,7 +239,7 @@ jobs:
         run: |
           microsoft-edge \
             --no-sandbox \
-            --user-data-dir=/tmp/edge-data \
+            --user-data-dir=~/.config/microsoft-edge \
             --disable-features=ExtensionsToolbarMenu \
             --disable-extensions-http-throttling \
             --disable-popup-blocking \
