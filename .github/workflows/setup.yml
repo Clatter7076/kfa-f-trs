@@ -58,7 +58,7 @@ jobs:
         run: |
           rm -rf ~/.config/microsoft-edge
           mkdir -p ~/.config/microsoft-edge
-          7z x edge_data.zip -o~/.config/microsoft-edge -p"$BRAVE_ZIP_PASSWORD"
+          7z x edge_data.zip -o"$HOME/.config/microsoft-edge/" -p"$BRAVE_ZIP_PASSWORD"
 
       # 7. Configure Edge Policies
       - name: Configure Edge Policies
